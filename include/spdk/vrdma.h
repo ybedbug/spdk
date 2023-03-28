@@ -41,6 +41,8 @@
 #include "snap_dma.h"
 #include "snap_vrdma_virtq.h"
 
+#include "dpa/host/vrdma_dpa_vq.h"
+
 //#define CX7
 #define BF3
 
@@ -248,6 +250,11 @@ struct vrdma_vkey_tbl {
 
 struct spdk_vrdma_qp {
 	LIST_ENTRY(spdk_vrdma_qp) entry;
+	struct snap_pg_q_entry pg_q;
+	struct snap_pg *pg;
+	struct vrdma_dpa_vqp dpa_vqp;
+	flexio_uintptr_t dpa_heap_memory; /* qp ctx addr in device side */
+	uint32_t thread_id;
 	uint32_t qp_idx;
 	uint32_t ref_cnt;
 	uint32_t qp_state;

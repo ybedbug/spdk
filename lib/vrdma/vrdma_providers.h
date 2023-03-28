@@ -47,12 +47,14 @@ struct vrdma_prov_emu_dev_init_attr {
 // };
 
 struct vrdma_vq_ops {
-	struct snap_vrdma_queue *(*create)(struct vrdma_ctrl *ctrl,
+	struct vrdma_dpa_thread_ctx *(*ctx_get_create)(struct vrdma_ctrl *ctrl,
 					   struct spdk_vrdma_qp *vqp,
 					   struct snap_vrdma_vq_create_attr* q_attr);
-	void (*destroy)(struct snap_vrdma_queue *virtq);
-	void (*dbg_stats_query)(struct snap_vrdma_queue *virtq);
-	uint32_t (*get_emu_db_to_cq_id)(struct snap_vrdma_queue *virtq);
+	int (*map_thread)(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
+					struct vrdma_dpa_thread_ctx *dpa_thread);
+	void (*destroy)(struct spdk_vrdma_qp *vqp);
+	void (*dbg_stats_query)(struct vrdma_dpa_thread_ctx *dpa_thread);
+	uint32_t (*get_emu_db_to_cq_id)(struct spdk_vrdma_qp *vqp);
 	// int (*modify)(struct vrdma_prov_vq *vq, uint64_t mask,
 				//  struct vrdma_prov_vq_attr *attr);
 };
@@ -75,12 +77,14 @@ int vrdma_prov_emu_dev_init(const struct vrdma_prov_emu_dev_init_attr *emu_attr,
 void vrdma_prov_emu_dev_uninit(void *emu_ctx_in);
 int vrdma_prov_emu_msix_send(void *handler);
 
-struct snap_vrdma_queue* 
-vrdma_prov_vq_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
-		     struct snap_vrdma_vq_create_attr *attr);
-void vrdma_prov_vq_destroy(struct snap_vrdma_queue *vq);
-void vrdma_prov_vq_query(struct snap_vrdma_queue *vq);
-uint32_t vrdma_prov_get_emu_db_to_cq_id(struct snap_vrdma_queue *vq);
+struct vrdma_dpa_thread_ctx *
+vrdma_prov_thread_ctx_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
+		       struct snap_vrdma_vq_create_attr *attr);
+void vrdma_prov_vq_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
+										struct vrdma_dpa_thread_ctx *dpa_thread);
+void vrdma_prov_vq_destroy(struct spdk_vrdma_qp *vq);
+void vrdma_prov_vq_query(struct vrdma_dpa_thread_ctx *dpa_thread);
+uint32_t vrdma_prov_get_emu_db_to_cq_id(struct spdk_vrdma_qp *vqp);
 void vrdma_prov_ops_register(const struct vrdma_prov_ops *ops);
 void vrdma_prov_ops_unregister(void);
 int vrdma_providers_load(void);

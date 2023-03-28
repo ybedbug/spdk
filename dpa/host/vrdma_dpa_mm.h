@@ -41,13 +41,13 @@ flexio_uintptr_t vrdma_dpa_mm_qp_buff_alloc(struct flexio_process *process,
 					      flexio_uintptr_t *sq_daddr);
 void vrdma_dpa_mm_qp_buff_free(struct flexio_process *process,
 				 flexio_uintptr_t buff_daddr);
-int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_vq *dpa_vq,
-				flexio_uintptr_t *rq_daddr,
-				uint32_t num_of_wqes,
-				uint32_t wqe_stride,
-				uint32_t elem_size,
-				uint32_t mkey_id);
-int vrdma_dpa_mkey_create(struct vrdma_dpa_vq *dpa_vq,
+int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
+									struct vrdma_dpa_dma_qp *dpa_dma_qp,
+									uint32_t num_of_wqes,
+									uint32_t wqe_stride,
+									uint32_t elem_size,
+									uint32_t mkey_id);
+int vrdma_dpa_mkey_create(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
 			    struct flexio_qp_attr *qp_attr,
 			    uint32_t data_bsize,
 				flexio_uintptr_t wqe_buff,

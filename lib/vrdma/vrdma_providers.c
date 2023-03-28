@@ -57,10 +57,10 @@ void vrdma_prov_emu_dev_uninit(void *emu_ctx_in)
 		prov_ops->emu_dev_uninit(emu_ctx_in);
 }
 
-void vrdma_prov_vq_query(struct snap_vrdma_queue *vq)
+void vrdma_prov_vq_query(struct vrdma_dpa_thread_ctx *dpa_thread)
 {
 	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->dbg_stats_query)
-		prov_ops->q_ops->dbg_stats_query(vq);
+		prov_ops->q_ops->dbg_stats_query(dpa_thread);
 }
 
 // int virtnet_prov_caps_query(void *dev, struct virtnet_prov_caps *caps_out)
@@ -79,11 +79,11 @@ int vrdma_prov_emu_msix_send(void *handler)
 	return 0;
 }
 
-struct snap_vrdma_queue*
-vrdma_prov_vq_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
+struct vrdma_dpa_thread_ctx *
+vrdma_prov_thread_ctx_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
 		       struct snap_vrdma_vq_create_attr *attr)
 {
-	struct snap_vrdma_queue *vq = NULL;
+	struct vrdma_dpa_thread_ctx *dpa_thread = NULL;
 
 	// attr->emu_ib_ctx = dev->ctx->emu_ib_ctx;
 	// attr->emu_pd = dev->ctx->emu_ib_pd;
@@ -102,22 +102,30 @@ vrdma_prov_vq_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
 	// attr->max_tunnel_desc = dev->ctx->sctx->virtio_net_caps.max_tunnel_desc;
 	// virtnet_vq_get_common_config(dev, attr->idx, &attr->common);
 
-	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->create)
-		vq = prov_ops->q_ops->create(ctrl, vqp, attr);
+	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->ctx_get_create)
+		dpa_thread = prov_ops->q_ops->ctx_get_create(ctrl, vqp, attr);
 
 	// if (!vq)
 	// 	return NULL;
 	// vq->idx = attr->idx;
-	return vq;
+	return dpa_thread;
 }
 
-void vrdma_prov_vq_destroy(struct snap_vrdma_queue *vq)
+void vrdma_prov_vq_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
+										struct vrdma_dpa_thread_ctx *thread)
+{
+	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->map_thread)
+		prov_ops->q_ops->map_thread(ctrl, vqp, thread);
+}
+
+
+void vrdma_prov_vq_destroy(struct spdk_vrdma_qp *vq)
 {
 	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->destroy)
 		prov_ops->q_ops->destroy(vq);
 }
 
-uint32_t vrdma_prov_get_emu_db_to_cq_id(struct snap_vrdma_queue *vq)
+uint32_t vrdma_prov_get_emu_db_to_cq_id(struct spdk_vrdma_qp *vq)
 {
 	if (prov_ops && prov_ops->q_ops && prov_ops->q_ops->get_emu_db_to_cq_id)
 		return prov_ops->q_ops->get_emu_db_to_cq_id(vq);

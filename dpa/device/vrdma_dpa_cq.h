@@ -21,7 +21,7 @@ enum {
 struct vrdma_dpa_cq_ctx;
 
 void vrdma_dpa_cq_incr(struct vrdma_dpa_cq_ctx *cq_ctx, uint16_t mask);
-volatile struct flexio_dev_cqe64 *
+struct flexio_dev_cqe64 *
 vrdma_dpa_cqe_get(struct vrdma_dpa_cq_ctx *ctx, uint16_t mask);
 void vrdma_dpa_cq_wait(struct vrdma_dpa_cq_ctx *cq_ctx, uint16_t mask,
 			uint16_t *comp_wqe_idx);

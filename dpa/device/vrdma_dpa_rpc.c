@@ -16,8 +16,7 @@
 #include <libflexio-dev/flexio_dev_queue_access.h>
 #include <libflexio-dev/flexio_dev_debug.h>
 #include "../vrdma_dpa_common.h"
-// #include "vrdma_dpa_txrx.h"
-// #include "vrdma_dpa_tx.h"
+#include "vrdma_dpa_dev_com.h"
 
 __FLEXIO_ENTRY_POINT_START
 
@@ -41,9 +40,23 @@ uint64_t test_dpa_flexio_work(uint64_t arg1, uint64_t arg2, uint64_t arg3)
 
 	res = arg1 + arg2 + arg3;
 
-	// flexio_dev_print("------naliu DPA says %lu + %lu + %lu is %lu\n", arg1, arg2, arg3, res);
-	printf("------naliu DPA says %lu + %lu + %lu is %lu\n", arg1, arg2, arg3, res);
+	// flexio_dev_print("DPA says %lu + %lu + %lu is %lu\n", arg1, arg2, arg3, res);
+	printf("DPA says %lu + %lu + %lu is %lu\n", arg1, arg2, arg3, res);
 	return res;
+}
+
+static inline int
+vrdma_dpa_get_free_vqp_slot(struct vrdma_dpa_event_handler_ctx *ehctx)
+{
+	int i;
+
+	for (i = 0; i < VQP_PER_THREAD; i++) {
+		if (!ehctx->vqp_ctx[i].valid) {
+			return i;
+		}
+	}
+	
+	return -1;
 }
 #endif
 
@@ -51,29 +64,70 @@ flexio_dev_rpc_handler_t vrdma_qp_rpc_handler;
 uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 {
 
-	struct  vrdma_dpa_event_handler_ctx *ectx;
+	struct vrdma_dpa_event_handler_ctx *ectx;
+	struct vrdma_dpa_vqp_ctx *vqp_ctx;
 	struct flexio_dev_thread_ctx *dtctx;
+	int free_idx;
+	
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
-	printf("\n------naliu vrdma_qp_rpc_handler start\n");
+	printf("\n vrdma_qp_rpc_handler start\n");
 #endif
 	flexio_dev_get_thread_ctx(&dtctx);
-	ectx = (struct vrdma_dpa_event_handler_ctx *)arg1;
+	vqp_ctx = (struct vrdma_dpa_vqp_ctx *)arg1;
+	ectx = (struct vrdma_dpa_event_handler_ctx *)vqp_ctx->eh_ctx_daddr;
+
+	/* insert new added vqp to thread ctx */
+	spin_lock(&ectx->vqp_array_lock);
+#if 0
+	free_idx = vrdma_dpa_get_free_vqp_slot(ectx);
+	if (free_idx == -1) {
+		printf("\n vrdma_qp_rpc_handler can not find free slot\n");
+		spin_lock(&ectx->vqp_array_lock);
+		return 0;
+	}
+#endif
+	free_idx = vqp_ctx->free_idx;
+	ectx->vqp_ctx[free_idx].emu_db_handle = vqp_ctx->emu_db_to_cq_id;
+	ectx->vqp_ctx[free_idx].valid = 1;
+	ectx->vqp_ctx[free_idx].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
+	ectx->vqp_count++;
+	ectx->dma_qp.state = VRDMA_DPA_VQ_STATE_RDY;
+	vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
+	fence_rw();
+	spin_unlock(&ectx->vqp_array_lock);
+#ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
+	printf("\n vrdma_qp_rpc_handler get free idx %d, db handle %d, vqp_ctx_handle %llx, vqp idx %d\n",
+			free_idx, vqp_ctx->emu_db_to_cq_id, (flexio_uintptr_t)vqp_ctx, vqp_ctx->vq_index);
+#endif
 	vrdma_debug_count_set(ectx, 0);
 	flexio_dev_outbox_config(dtctx, ectx->emu_outbox);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
-	printf("\n------naliu vrdma_qp_rpc_handler cqn: %#x, emu_db_to_cq_id %d,"
-		"guest_db_cq_ctx.ci %d\n", ectx->guest_db_cq_ctx.cqn,
-		ectx->emu_db_to_cq_id, ectx->guest_db_cq_ctx.ci);
+	printf("\n vrdma_qp_rpc_handler cqn: %#x, emu_db_to_cq_id %d,"
+		"guest_db_cq_ctx.ci %d, vqp cnt %d\n", ectx->guest_db_cq_ctx.cqn,
+		vqp_ctx->emu_db_to_cq_id, ectx->guest_db_cq_ctx.ci,
+		ectx->vqp_count);
 #endif
 	flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
-			      ectx->emu_db_to_cq_id);
+				      vqp_ctx->emu_db_to_cq_id);
 	flexio_dev_cq_arm(dtctx, ectx->guest_db_cq_ctx.ci,
-			  ectx->guest_db_cq_ctx.cqn);
+				  		ectx->guest_db_cq_ctx.cqn);
+#if 0
+
 	flexio_dev_db_ctx_force_trigger(dtctx, ectx->guest_db_cq_ctx.cqn,
-					ectx->emu_db_to_cq_id);
+						vqp_ctx->emu_db_to_cq_id);
+
+	if (ectx->vqp_count == 1) {
+		flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
+				      vqp_ctx->emu_db_to_cq_id);
+		flexio_dev_cq_arm(dtctx, ectx->guest_db_cq_ctx.ci,
+				  		ectx->guest_db_cq_ctx.cqn);
+		flexio_dev_db_ctx_force_trigger(dtctx, ectx->guest_db_cq_ctx.cqn,
+						vqp_ctx->emu_db_to_cq_id);
+	}
+#endif
 	vrdma_debug_count_set(ectx, 1);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
-	printf("\n------naliu vrdma_qp_rpc_handler end\n");
+	printf("\n vrdma_qp_rpc_handler end\n");
 #endif
 	return 0;
 }

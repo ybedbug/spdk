@@ -222,6 +222,22 @@ int extract_dev_elf(const char *dev_elf_fname, void **elf_buf, size_t *elf_size)
 	return 0;
 }
 
+static inline int vrdma_dpa_init_threads(struct vrdma_dpa_ctx *dpa_ctx) 
+{
+	int i;
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+
+	g_dpa_threads = calloc(1, sizeof(*dpa_thread) * MAX_DPA_THREAD);
+	if (!g_dpa_threads) {
+		log_error("create dpa threads %d: no memory\n");
+		return -1;
+	}
+	for(i = 0; i < MAX_DPA_THREAD; i++) {
+		g_dpa_threads[i].attached_vqp_num = 0;
+		g_dpa_threads[i].dpa_ctx = dpa_ctx;
+	}
+	return 0;
+}
 
 #define PRINTF_BUFF_BSIZE (4 * 2048)
 int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
@@ -240,7 +256,11 @@ int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
 		log_error("Failed to allocate dpa_ctx memory");
 		return -ENOMEM;
 	}
-	log_debug("===naliu vrdma_dpa_init begin\n");
+	if (vrdma_dpa_init_threads(dpa_ctx)) {
+		goto err_dpa_init_threads;
+	}
+	
+	log_debug("vrdma_dpa_init begin\n");
 	dpa_ctx->core_count = 1;
 
 	dpa_ctx->emu_mgr_vhca_id = attr->emu_mgr_vhca_id;
@@ -273,7 +293,7 @@ int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
 		goto err_vq_pup_reg;
 	}
 
-	log_debug("===naliu vrdma_dpa_init extract_dev_elf done\n");
+	log_debug("vrdma_dpa_init extract_dev_elf done\n");
 	process_attr.pd = attr->emu_pd;
 	err = flexio_process_create(attr->emu_ctx, dpa_ctx->app,
 				    &process_attr, &dpa_ctx->flexio_process);
@@ -315,7 +335,7 @@ int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
 		log_error("Failed to create window, err(%d)", err);
 		goto err_window_create;
 	}
-#ifdef VRDMA_DPA_DEBUG
+//#ifdef VRDMA_DPA_DEBUG
 	/*Init Print environment*/
 	err = vrdma_dpa_dev_print_init(dpa_ctx->flexio_process,
 					 dpa_ctx->flexio_uar, PRINF_BUF_SZ,
@@ -324,7 +344,7 @@ int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
 		log_error("Failed to init vrdma dpa dev print, err(%d)", err);
 		goto err_print;
 	}
-#endif
+//#endif
 
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	/*Init Print environment*/
@@ -361,10 +381,10 @@ int vrdma_dpa_init(const struct vrdma_prov_init_attr *attr, void **out)
 err_reg_mr:
 	free(dpa_ctx->vq_data);
 err_posix_memalign:
-#ifdef VRDMA_DPA_DEBUG
+//#ifdef VRDMA_DPA_DEBUG
 	flexio_print_destroy(dpa_ctx->flexio_process);
 err_print:
-#endif
+//#endif
 	flexio_window_destroy(dpa_ctx->window);
 err_window_create:
 	flexio_outbox_destroy(dpa_ctx->db_outbox);
@@ -383,6 +403,8 @@ err_pup_reg:
 err_app_create:
 	free(dpa_ctx->elf_buf);
 err_dev_elf:
+	free(g_dpa_threads);
+err_dpa_init_threads:
 	free(dpa_ctx);
 	return err;
 }
@@ -391,7 +413,7 @@ void vrdma_dpa_uninit(void *in)
 {
 	struct vrdma_dpa_ctx *dpa_ctx;
 
-	log_notice("naliu begin vrdma_dpa_uninit\n");
+	log_notice("begin vrdma_dpa_uninit\n");
 	dpa_ctx = (struct vrdma_dpa_ctx *)in;
 	ibv_dereg_mr(dpa_ctx->vq_data_mr);
 	free(dpa_ctx->vq_data);
@@ -399,16 +421,17 @@ void vrdma_dpa_uninit(void *in)
 	flexio_outbox_destroy(dpa_ctx->db_outbox);
 	flexio_uar_destroy(dpa_ctx->flexio_uar);
 	mlx5dv_devx_free_uar(dpa_ctx->emu_uar);
-#ifdef VRDMA_DPA_DEBUG
+//#ifdef VRDMA_DPA_DEBUG
 	flexio_print_destroy(dpa_ctx->flexio_process);
-#endif
+//#endif
 	flexio_process_destroy(dpa_ctx->flexio_process);
 	vrdma_dpa_vq_pup_func_deregister(dpa_ctx);
 	vrdma_dpa_pup_func_deregister(dpa_ctx);
 	flexio_app_destroy(dpa_ctx->app);
 	free(dpa_ctx->elf_buf);
 	free(dpa_ctx);
-	log_notice("naliu end vrdma_dpa_uninit\n");
+	free(g_dpa_threads);
+	log_notice("end vrdma_dpa_uninit\n");
 }
 
 
@@ -426,7 +449,7 @@ vrdma_dpa_device_msix_create(struct flexio_process *process,
 	msix_attr.sf_vhca_id  = attr->sf_vhca_id;
 	msix_attr.msix_vector = attr->msix_config_vector;
 
-	return vrdma_dpa_msix_create(NULL, process, &msix_attr, emu_dev_ctx,
+	return vrdma_dpa_msix_create(emu_dev_ctx, &msix_attr, 
 				       max_msix);
 }
 
@@ -448,7 +471,7 @@ int vrdma_dpa_emu_dev_init(const struct vrdma_prov_emu_dev_init_attr *attr,
 		log_error("Failed to allocate emu_dev_ctx memory");
 		return -ENOMEM;
 	}
-	log_debug("===naliu vrdma_dpa_emu_dev_init num_msix %d\n", attr->num_msix);
+	log_debug("vrdma_dpa_emu_dev_init num_msix %d\n", attr->num_msix);
 	emu_dev_ctx->msix = calloc(attr->num_msix,
 				   sizeof(struct vrdma_dpa_msix));
 	if (!emu_dev_ctx->msix) {
@@ -514,7 +537,7 @@ err_msix_alloc:
 void vrdma_dpa_emu_dev_uninit(void *emu_dev_handler)
 {
 	struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx = emu_dev_handler;
-	log_notice("naliu begin vrdma_dpa_emu_dev_uninit\n");
+	log_notice("begin vrdma_dpa_emu_dev_uninit\n");
 	vrdma_dpa_device_msix_destroy(emu_dev_ctx->msix_config_vector,
 					emu_dev_ctx);
 #if 0
@@ -523,7 +546,7 @@ void vrdma_dpa_emu_dev_uninit(void *emu_dev_handler)
 #endif
 	free(emu_dev_ctx->msix);
 	free(emu_dev_ctx);
-	log_notice("naliu end vrdma_dpa_emu_dev_uninit\n");
+	log_notice("end vrdma_dpa_emu_dev_uninit\n");
 }
 
 /*used when device state changed*/

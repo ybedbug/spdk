@@ -869,7 +869,8 @@ static void vrdma_aq_destroy_suspended_qp(struct vrdma_ctrl *ctrl,
 		return;
 	}
 	if (vrdma_qp_is_connected_ready(vqp) && ctrl->sctrl) {
-		snap_vrdma_desched_vq(vqp->snap_queue);
+		//snap_vrdma_desched_vq(vqp->snap_queue);
+		vrdma_desched_vq(vqp);
 	}
 	vrdma_destroy_vq(ctrl, vqp);
 	if (ctrl->srv_ops->vrdma_device_destroy_qp(&ctrl->dev, aqe)) {
@@ -924,11 +925,13 @@ static int vrdma_aq_destroy_qp(struct vrdma_ctrl *ctrl,
 					aqe->resp.destroy_qp_resp.err_code);
 		return 0;
 	}
+#if 0
 	if (vrdma_qp_is_connected_ready(vqp)) {
 		if (vrdma_set_vq_flush(ctrl, vqp)) {
 			return VRDMA_CMD_STATE_WAITING;
 		}
 	}
+#endif
 	vrdma_aq_destroy_suspended_qp(ctrl, aqe, vqp);
 	return 0;
 }
@@ -1057,10 +1060,16 @@ static void vrdma_aq_modify_qp(struct vrdma_ctrl *ctrl,
 		SPDK_NOTICELOG("vqp %d qp_state=0x%x new qp_state = 0x%x\n",
 				aqe->req.modify_qp_req.qp_handle,
 				vqp->qp_state, aqe->req.modify_qp_req.qp_state);
+		if (vqp->qp_state == IBV_QPS_INIT &&
+			aqe->req.modify_qp_req.qp_state == IBV_QPS_RTR) {
+			/* init2rtr vqp join poller-group */
+			vrdma_sched_vq(ctrl->sctrl, vqp);
+			vrdma_qp_sm_start(vqp);
+		}
 		if (vqp->qp_state != IBV_QPS_ERR &&
 			aqe->req.modify_qp_req.qp_state == IBV_QPS_ERR) {
 			/* Take vqp out of poller-group when it changed to ERR state */
-			snap_vrdma_desched_vq(vqp->snap_queue);
+			vrdma_desched_vq(vqp);
 		}
 		vqp->qp_state = aqe->req.modify_qp_req.qp_state;
 	}
