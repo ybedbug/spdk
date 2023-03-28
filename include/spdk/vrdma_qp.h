@@ -53,7 +53,7 @@
 #define VRDMA_BACKEND_QP_SQ_SIZE 32*1024
 #define VRDMA_BACKEND_QP_RQ_SIZE 32*1024
 #define VRDMA_QP_MAX_RD_ATOMIC 16
-//#define MPATH_DBG
+#define MPATH_DBG
 struct snap_vrdma_backend_qp;
 
 struct mqp_sq_meta {
@@ -67,6 +67,7 @@ struct vrdma_backend_qp {
     uint32_t poller_core;
     struct snap_vrdma_backend_qp bk_qp;
     LIST_HEAD(, vrdma_vqp) vqp_list;
+    uint32_t vqp_cnt;
     uint32_t remote_qpn;
     uint32_t qp_state;
     struct mqp_sq_meta *sq_meta_buf;
