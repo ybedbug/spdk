@@ -256,9 +256,10 @@ struct vrdma_tgid_node {
     struct vrdma_tgid_key           key;
     struct spdk_vrdma_dev           *local_vdev;
     struct ibv_pd                   *pd;
-#define VRDMA_DEV_SRC_UDP_CNT       2
-    uint8_t                         rsvd[3];
-    struct vrdma_udp_sport_node     src_udp[VRDMA_DEV_SRC_UDP_CNT];
+    uint8_t                         max_mqp_cnt;
+    uint8_t                         curr_mqp_cnt;
+    uint8_t                         rsvd[2];
+    struct vrdma_udp_sport_node     *src_udp;
 };
 
 /*

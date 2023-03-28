@@ -1161,7 +1161,7 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 #ifdef WQE_DBG
         SPDK_NOTICELOG("vrdam sq vqp=%p tqpn=%u, "
                        "mqp.qpn=0x%x mqp.pi=%u, mqp.ci=%u\n",
-                       vqp, sq_meta->vqp->qp_idx, backend_qp->qpnum, 
+                       vqp, sq_meta->vqp->qp_idx, backend_qp->qpnum,
                        backend_qp->hw_qp.sq.pi, backend_qp->sq_ci);
 #endif
 		switch (opcode) {
