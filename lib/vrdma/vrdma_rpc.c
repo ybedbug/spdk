@@ -357,7 +357,7 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
     }
 
     tgid_node = vrdma_find_tgid_node(&attr->local_tgid, &attr->remote_tgid);
-    if (!tgid_node || attr->mqp_idx >= VRDMA_DEV_SRC_UDP_CNT ||
+    if (!tgid_node || attr->mqp_idx >= tgid_node->max_mqp_cnt ||
         !tgid_node->src_udp[attr->mqp_idx].mqp) {
         SPDK_ERRLOG("Failed to find tgid_node or mqp for response msg\n");
         goto free_attr;
@@ -647,12 +647,12 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
                                            &attr->remote_tgid,
                                            ctrl->vdev,
                                            ctrl->vdev->vrdma_sf.sf_pd,
-                                           0xc000, VRDMA_DEV_SRC_UDP_CNT);
+                                           0xc000, spdk_env_get_core_count());
         if (!tgid_node) {
             goto invalid;
         }
     }
-    if (attr->mqp_idx >= VRDMA_DEV_SRC_UDP_CNT) {
+    if (attr->mqp_idx >= tgid_node->max_mqp_cnt) {
         SPDK_ERRLOG("invalid mqp_idx=%u\n", attr->mqp_idx);
         goto invalid;
     }
@@ -663,6 +663,7 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
         if (!mqp)
             goto invalid;
         vrdma_modify_backend_qp_to_init(mqp);
+        tgid_node->curr_mqp_cnt++;
     }
     if (mqp->qp_state == IBV_QPS_INIT) {
         spdk_vrdma_set_qp_attr(ctrl, tgid_node, attr, &qp_attr, &attr_mask, &rdy_attr);

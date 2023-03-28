@@ -64,9 +64,14 @@ void
 vrdma_destroy_tgid_list(void)
 {
     struct vrdma_tgid_node *tmp_node, *tgid_node = NULL;
+    uint8_t i;
 
     LIST_FOREACH_SAFE(tgid_node, &vrdma_tgid_list, entry, tmp_node) {
         LIST_REMOVE(tgid_node, entry);
+        for (i = 0; i < tgid_node->curr_mqp_cnt; i++) {
+            vrdma_destroy_backend_qp(&tgid_node->src_udp[i].mqp);
+        }
+        free(tgid_node->src_udp);
         free(tgid_node);
     }
 }
@@ -87,10 +92,17 @@ vrdma_create_tgid_node(union ibv_gid *remote_tgid,
         SPDK_ERRLOG("Failed to create tgid_node\n");
         return NULL;
     }
-    SPDK_NOTICELOG("created new tgid_node\n");
+    SPDK_NOTICELOG("created new tgid_node, max_mqp_cnt=%u\n", max_mqp_cnt);
     memcpy(&tgid_node->key.local_tgid, local_tgid, sizeof(union ibv_gid));
     memcpy(&tgid_node->key.remote_tgid, remote_tgid, sizeof(union ibv_gid));
     tgid_node->local_vdev = local_vdev;
+    tgid_node->max_mqp_cnt = max_mqp_cnt;
+    tgid_node->src_udp = calloc(max_mqp_cnt, sizeof(struct vrdma_udp_sport_node));
+    if (!tgid_node->src_udp) {
+        free(tgid_node);
+        SPDK_ERRLOG("Failed to create vrdma_udp_sport_node\n");
+        return NULL;
+    }
     for(i = 0; i < max_mqp_cnt; i++) {
         tgid_node->src_udp[i].udp_src_port = udp_sport_start + i;
     }
@@ -116,35 +128,41 @@ vrdma_find_mqp(struct vrdma_ctrl *ctrl,
                struct vrdma_tgid_node *tgid_node,
                uint8_t *mqp_idx)
 {
-    struct vrdma_backend_qp *mqp = NULL;
+    struct vrdma_backend_qp *mqp = NULL, *tmp_mqp = NULL;
     uint8_t i;
 
     if (!tgid_node || !mqp_idx) return NULL;
-    *mqp_idx = 0;
-    for (i = 0; i < VRDMA_DEV_SRC_UDP_CNT; i++) {
-#ifdef MPATH_DBG
-        SPDK_NOTICELOG("tgid_node->src_udp[%d].mqp=%p",
-                       i, tgid_node->src_udp[i].mqp);
-#endif
-        if (tgid_node->src_udp[i].mqp &&
-            tgid_node->src_udp[i].mqp->qp_state != IBV_QPS_ERR) {
-            mqp = tgid_node->src_udp[i].mqp;
-            *mqp_idx = i;
-        }
-    }
-    if (!mqp) {
+    if (tgid_node->curr_mqp_cnt < tgid_node->max_mqp_cnt) {
+        *mqp_idx = tgid_node->curr_mqp_cnt;
         mqp = vrdma_create_backend_qp(tgid_node, *mqp_idx);
         if (!mqp) {
             SPDK_ERRLOG("failed to create bankend qp\n");
             return NULL;
         }
-        if (vrdma_modify_backend_qp_to_init(mqp))
+        if (vrdma_modify_backend_qp_to_init(mqp)) {
+            vrdma_destroy_backend_qp(&mqp);
             return NULL;
+        }
         if (vrdma_qp_notify_remote_by_rpc(ctrl, tgid_node, *mqp_idx)) {
             SPDK_ERRLOG("failed to send rpc\n");
             vrdma_destroy_backend_qp(&mqp);
             tgid_node->src_udp[*mqp_idx].mqp = NULL;
             return NULL;
+        }
+        tgid_node->curr_mqp_cnt++;
+        return mqp;
+    } else {
+        for (i = 0; i < tgid_node->max_mqp_cnt; i++) {
+#ifdef MPATH_DBG
+            SPDK_NOTICELOG("tgid_node->src_udp[%d].mqp=%p",
+                           i, tgid_node->src_udp[i].mqp);
+#endif
+            tmp_mqp = tgid_node->src_udp[i].mqp;
+            if (!mqp || (tmp_mqp && tmp_mqp->qp_state != IBV_QPS_ERR &&
+                         tmp_mqp->vqp_cnt < mqp->vqp_cnt)) {
+                mqp = tgid_node->src_udp[i].mqp;
+                *mqp_idx = i;
+            }
         }
     }
     return mqp;
@@ -166,7 +184,9 @@ int vrdma_mqp_add_vqp_to_list(struct vrdma_backend_qp *mqp,
     if (mqp->qp_state == IBV_QPS_RTS)
         vqp->bk_qp = mqp;
     LIST_INSERT_HEAD(&mqp->vqp_list, vqp_entry, entry);
-    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x\n", vqp_idx, mqp->bk_qp.qpnum);
+    mqp->vqp_cnt++;
+    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
+                   vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
     return 0;
 }
 
@@ -182,7 +202,9 @@ vrdma_mqp_del_vqp_from_list(struct vrdma_backend_qp *mqp,
         }
     }
     free(vqp_entry);
-    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x", vqp_idx, mqp->bk_qp.qpnum);
+    mqp->vqp_cnt--;
+    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
+                   vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
     return;
 }
 
@@ -249,7 +271,7 @@ vrdma_create_backend_qp(struct vrdma_tgid_node *tgid_node,
 	}
     tgid_node->src_udp[mqp_idx].mqp = qp;
     qp->qp_state = IBV_QPS_INIT;
-	SPDK_NOTICELOG("create bk_qpn 0x%x sucessfully\n", qp->bk_qp.qpnum);
+	SPDK_NOTICELOG("create mqp=0x%x mqp_idx=%u sucessfully\n", qp->bk_qp.qpnum, mqp_idx);
 	return qp;
 
 free_bk_qp:
@@ -457,18 +479,19 @@ bool vrdma_set_vq_flush(struct vrdma_ctrl *ctrl,
     struct mqp_sq_meta *sq_meta = NULL;
     struct vrdma_backend_qp *mqp = vqp->bk_qp;
 
-    q_size = mqp->bk_qp.hw_qp.sq.wqe_cnt;
-    mqp_pi = mqp->bk_qp.hw_qp.sq.pi;
-    mqp_ci = mqp->bk_qp.sq_ci;
-    if (vrdma_vq_rollback(mqp_pi, mqp_ci, q_size)) {
-        mqp_ci += q_size;
+    if (mqp) {
+        q_size = mqp->bk_qp.hw_qp.sq.wqe_cnt;
+        mqp_pi = mqp->bk_qp.hw_qp.sq.pi;
+        mqp_ci = mqp->bk_qp.sq_ci;
+        if (vrdma_vq_rollback(mqp_pi, mqp_ci, q_size)) {
+            mqp_ci += q_size;
+        }
+        for (wqe_idx = mqp_ci + 1; wqe_idx < mqp_pi; wqe_idx++) {
+            sq_meta = &mqp->sq_meta_buf[wqe_idx & (q_size - 1)];
+            if (sq_meta->vqp && sq_meta->vqp->qp_idx == vqp->qp_idx)
+                sq_meta->vqp = NULL;
+        }
     }
-    for (wqe_idx = mqp_ci + 1; wqe_idx < mqp_pi; wqe_idx++) {
-        sq_meta = &mqp->sq_meta_buf[wqe_idx & (q_size - 1)];
-        if (sq_meta->vqp && sq_meta->vqp->qp_idx == vqp->qp_idx)
-            sq_meta->vqp = NULL;
-    }
-
 	if (ctrl->sctrl->q_ops->is_suspended(vqp->snap_queue))
 		return false;
 	ctrl->sctrl->q_ops->suspend(vqp->snap_queue);

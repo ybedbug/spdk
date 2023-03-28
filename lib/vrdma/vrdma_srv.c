@@ -335,7 +335,7 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
                                                ctrl->vdev,
                                                ctrl->vdev->vrdma_sf.sf_pd,
                                                0xc000,
-                                               VRDMA_DEV_SRC_UDP_CNT);
+                                               spdk_env_get_core_count());
             if (!tgid_node) {
                 return -1;
             }
