@@ -1060,12 +1060,6 @@ static void vrdma_aq_modify_qp(struct vrdma_ctrl *ctrl,
 		SPDK_NOTICELOG("vqp %d qp_state=0x%x new qp_state = 0x%x\n",
 				aqe->req.modify_qp_req.qp_handle,
 				vqp->qp_state, aqe->req.modify_qp_req.qp_state);
-		if (vqp->qp_state == IBV_QPS_INIT &&
-			aqe->req.modify_qp_req.qp_state == IBV_QPS_RTR) {
-			/* init2rtr vqp join poller-group */
-			vrdma_sched_vq(ctrl->sctrl, vqp);
-			vrdma_qp_sm_start(vqp);
-		}
 		if (vqp->qp_state != IBV_QPS_ERR &&
 			aqe->req.modify_qp_req.qp_state == IBV_QPS_ERR) {
 			/* Take vqp out of poller-group when it changed to ERR state */
