@@ -196,6 +196,8 @@ vrdma_mqp_del_vqp_from_list(struct vrdma_backend_qp *mqp,
 {
     struct vrdma_vqp *vqp_entry = NULL, *tmp;
 
+    SPDK_NOTICELOG("vqp=0x%x, mqp=%p", vqp_idx, mqp);
+    if(!mqp) return;
     LIST_FOREACH_SAFE(vqp_entry, &mqp->vqp_list, entry, tmp) {
         if (vqp_entry->qpn == vqp_idx) {
             LIST_REMOVE(vqp_entry, entry);
