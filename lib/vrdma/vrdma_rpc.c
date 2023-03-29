@@ -369,7 +369,8 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
             vrdma_modify_backend_qp_to_rtr(mqp, &qp_attr, attr_mask, &rdy_attr);
             vrdma_qp_notify_remote_by_rpc(ctrl, tgid_node, attr->mqp_idx);
         }
-        if (attr->qp_state == IBV_QPS_RTR && mqp->qp_state == IBV_QPS_RTR) {
+        if ((attr->qp_state == IBV_QPS_RTR || attr->qp_state == IBV_QPS_RTS) &&
+            (mqp->qp_state == IBV_QPS_RTR)) {
             vrdma_modify_backend_qp_to_rts(mqp);
             set_spdk_vrdma_bk_qp_active(mqp);
         }
