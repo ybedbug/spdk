@@ -102,8 +102,8 @@ spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
 	    spdk_poller_unregister(&client->client_conn_poller);
         client->client_conn_poller = NULL;
     }
-	if (client->client_conn) {
-		spdk_jsonrpc_client_close(client->client_conn);
+	if (client->client_conn) {	
+        spdk_jsonrpc_client_close(client->client_conn);
         client->client_conn = NULL;
     }
 }
@@ -133,17 +133,17 @@ spdk_vrdma_rpc_client_poller(void *arg)
 		spdk_vrdma_close_rpc_client(client);
 		return -1;
 	}
-	resp = spdk_jsonrpc_client_get_response(client->client_conn);
-	assert(resp);
-	if (resp->error) {
-		SPDK_ERRLOG("error response: %*s", (int)resp->error->len,
-                (char *)resp->error->start);
-		spdk_jsonrpc_client_free_response(resp);
-		spdk_vrdma_close_rpc_client(client);
-	} else {
-		/* We have response so we must have callback for it. */
-		assert(client->client_resp_cb != NULL);
-		client->client_resp_cb(client, resp);
+	while ((resp = spdk_jsonrpc_client_get_response(client->client_conn)) != NULL) {
+        if (resp->error) {
+            SPDK_ERRLOG("error response: %*s", (int)resp->error->len,
+                        (char *)resp->error->start);
+            spdk_jsonrpc_client_free_response(resp);
+            spdk_vrdma_close_rpc_client(client);
+        } else {
+            /* We have response so we must have callback for it. */
+            assert(client->client_resp_cb != NULL);
+            client->client_resp_cb(client, resp);
+        }
 	}
 	return -1;
 }
@@ -413,6 +413,7 @@ spdk_vrdma_rpc_client_configuration(const char *addr)
 
     if (client->client_conn) {
 		SPDK_NOTICELOG("RPC client connect to '%s' is already existed.\n", addr);
+        spdk_jsonrpc_client_inc_ref_cnt(client->client_conn);
 		return 0;
 	}
     client->client_conn = spdk_jsonrpc_client_connect(addr, AF_UNSPEC);

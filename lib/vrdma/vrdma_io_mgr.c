@@ -1243,18 +1243,23 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 	struct vrdma_r_vkey *r_vkey, *vkey_tmp;
 	struct timespec end_tv;
 
+	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		if (r_vkey->vkey_tbl.gid_ip == vqp->remote_gid_ip) {
 			if (r_vkey->vkey_tbl.vkey[vqp->wait_vkey].mkey) {
 				/* remote mkey found */
 				vqp->sq.comm.num_to_parse = vqp->local_pi - vqp->sq.comm.pre_pi;
 				vqp->sm_state = VRDMA_QP_STATE_GEN_COMP;
+				vqp->last_r_mkey = r_vkey->vkey_tbl.vkey[vqp->wait_vkey].mkey;
+				vqp->last_r_mkey_ts = &r_vkey->vkey_tbl.vkey[vqp->wait_vkey].ts;
 				vrdma_qp_wqe_sm_submit(vqp, status);
+				pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 				return true;
 			}
 			break;
 		}
 	}
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 
 	/* Waiting remote mkey*/
 	clock_gettime(CLOCK_REALTIME, &end_tv);
@@ -1677,9 +1682,6 @@ void vrdma_dpa_rx_cb(struct spdk_vrdma_qp *vqp,
 		SPDK_ERRLOG("vrdma dpa rx, no backend qp is created for vqpn %d\n", vqp->qp_idx);
 		return;
 	}
-#ifdef MPATH_DBG
-	//SPDK_NOTICELOG("%s: vqp=0x%x get mqp=0x%x\n", __func__, vqp->qp_idx, vqp->bk_qp->bk_qp.qpnum);
-#endif
 	vrdma_qp_wqe_sm_submit(vqp, status);
 }
 

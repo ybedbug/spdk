@@ -56,8 +56,15 @@ struct vrdma_indirect_mkey {
 LIST_HEAD(vrdma_indirect_mkey_list_head, vrdma_indirect_mkey);
 extern struct vrdma_indirect_mkey_list_head vrdma_indirect_mkey_list;
 
+enum vrdma_mkey_state {
+	MKEY_INIT  = 0,
+	MKEY_PENDING = 1,
+	MKEY_VALID =2,
+};
+
 struct vrdma_r_vkey_entry {
 	uint32_t mkey;
+	uint32_t state;
 	uint64_t ts;
 };
 struct vrdma_r_vkey_tbl {
@@ -70,6 +77,7 @@ struct vrdma_r_vkey {
 };
 LIST_HEAD(vrdma_r_vkey_list_head, vrdma_r_vkey);
 extern struct vrdma_r_vkey_list_head vrdma_r_vkey_list;
+extern pthread_spinlock_t vrdma_r_vkey_list_lock;
 
 struct vrdma_ctrl;
 
@@ -83,6 +91,7 @@ int vrdma_create_remote_mkey(struct vrdma_ctrl *ctrl,
 					struct spdk_vrdma_mr *vmr);
 void vrdma_reg_mr_create_attr(struct vrdma_create_mr_req *mr_req,
 				struct spdk_vrdma_mr *vmr);
+void spdk_vrdma_init_vkey_lock(void);
 void spdk_vrdma_set_vkey_tv(void);
 void spdk_vrdma_vkey_age_progress(void);
 void vrdma_del_r_vkey_list(void);
