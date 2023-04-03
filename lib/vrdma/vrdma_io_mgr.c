@@ -54,6 +54,7 @@
 
 #define MAX_POLL_WQE_NUM 64
 #define MLX5_ATOMIC_SIZE 8
+#define POLL_CQ_NUM 1024
 //#define WQE_DBG
 //#define VCQ_ERR
 //#define POLL_PI_DBG
@@ -605,7 +606,7 @@ static inline void vrdma_wqe_submit(struct snap_vrdma_backend_qp *bk_qp,
 									struct mlx5_wqe_ctrl_seg *ctrl)
 {
 	uint8_t ds = be32toh(ctrl->qpn_ds) & 0xFF;
-
+	
 	bk_qp->hw_qp.sq.pi += DIV_ROUND_UP(ds * 16, MLX5_SEND_WQE_BB);
 #if 0
 	if (bk_qp->db_flag == SNAP_DB_RING_BATCH) {
@@ -629,7 +630,7 @@ static inline void vrdma_tx_complete(struct snap_vrdma_backend_qp *bk_qp)
 		vrdma_ring_tx_db(bk_qp, bk_qp->ctrl);
 	}
 #endif
-	if (bk_qp->ctrl)
+	 if (bk_qp->ctrl)
 		vrdma_ring_tx_db(bk_qp, bk_qp->ctrl);
 }
 
@@ -723,125 +724,8 @@ static inline uint16_t vrdma_set_inl_data_seg(struct vrdma_send_wqe *wqe, void *
 	return (align(len + sizeof dseg->byte_count, 16) / 16);
 }
 
-static int vrdma_write_back_sq_cqe(struct spdk_vrdma_qp *vqp, uint16_t cqe_num)
-{
-	struct spdk_vrdma_cq *vcq = vqp->sq_vcq;
-	uint32_t pi = 0;
-	uint32_t pre_pi = 0;
-	uint32_t cqe_idx =0;
-	uint32_t write_size = 0;
-	uint64_t host_ring_addr;
-	uint8_t *local_ring_addr;
-	uint32_t offset = 0;
-	uint16_t first_num = 0, sec_num = 0;
-	uint16_t q_size = vcq->cqe_entry_num;
-	int ret;
-	uint32_t i;
-	struct vrdma_cqe *vcqe;
-
-	clock_gettime(CLOCK_REALTIME, &g_cqe_tv);
-
-	cqe_idx = pre_pi = atomic_fetch_add_explicit(&vcq->pi, cqe_num, memory_order_relaxed);
-	pi = pre_pi + cqe_num;
-	/* setup owner bit */
-	for (i = 0; i < cqe_num; i++) {
-		vcqe = (struct vrdma_cqe *)vqp->sq.local_cq_buff + i;
-		/* owner bit should be alligned with provider side
-		 * currently, provider side set this value to 0
-		 */
-		vcqe->owner = !((cqe_idx++) & (vcq->cqe_entry_num));
-	}
-#ifdef WQE_DBG
-	SPDK_NOTICELOG("vrdam write back cqe start: vcq pi %d, pre_pi %d, ci %d\n",
-					pi, pre_pi, vcq->pici->ci);
-#endif
-	if (pi - vcq->pici->ci > vcq->cqe_entry_num) {
-		SPDK_ERRLOG("vcq is full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
-					pi, pre_pi, vcq->pici->ci);
-		return 0;
-	}
-	//fetch the delta PI number entry in one time
-	if (!vrdma_vq_rollback(pre_pi, pi, q_size)) {
-		vqp->q_comp.count = 1;
-		vqp->q_comp.func = vrdma_qp_sm_dma_cb;
-		write_size = cqe_num * vcq->cqebb_size;
-		offset = (pre_pi % q_size) * vcq->cqebb_size;
-		host_ring_addr = vcq->host_pa + offset;
-		local_ring_addr = (uint8_t *)((uint8_t *)vqp->sq.local_cq_buff);
-#ifdef WQE_DBG
-		SPDK_NOTICELOG("write cqe: num %d host base addr 0x%lx host ring addr 0x%lx"
-						"local base 0x%p local ring 0x%p\n",
-						cqe_num, vcq->host_pa, host_ring_addr,
-						vqp->sq.local_cq_buff, local_ring_addr);
-#endif
-		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
-							vqp->qp_mr->lkey, host_ring_addr,
-							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
-		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
-			return -1;
-		}
-		vqp->stats.sq_dma_tx_cnt++;
-	} else {
-		/* vq roll back case, first part */
-		vqp->q_comp.count = 1;
-		vqp->q_comp.func = vrdma_qp_sm_dma_cb;
-		first_num = q_size - (pre_pi % q_size);
-		write_size = first_num * vcq->cqebb_size;
-		offset = (pre_pi % q_size) * vcq->cqebb_size;
-		host_ring_addr = vcq->host_pa + offset;
-		local_ring_addr = (uint8_t *)((uint8_t *)vqp->sq.local_cq_buff);
-#ifdef WQE_DBG
-		SPDK_NOTICELOG("write cqe first: num %d host base addr 0x%lx host ring addr 0x%lx"
-						"local base 0x%p local ring 0x%p\n",
-						first_num, vcq->host_pa, host_ring_addr,
-						vqp->sq.local_cq_buff, local_ring_addr);
-#endif
-		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
-							vqp->qp_mr->lkey, host_ring_addr,
-							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
-		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
-			return -1;
-		}
-		vqp->stats.sq_dma_tx_cnt++;
-
-		/* calculate second write size */
-		vqp->q_comp.count++;
-		vqp->q_comp.func = vrdma_qp_sm_dma_cb;
-		sec_num = pi % q_size;
-		write_size = sec_num * vcq->cqebb_size;
-		local_ring_addr = (uint8_t *)(vqp->sq.local_cq_buff + first_num);
-		host_ring_addr = vcq->host_pa;
-#ifdef WQE_DBG
-		SPDK_NOTICELOG("write cqe second: num %d host base addr 0x%lx host ring addr 0x%lx"
-						"local base 0x%p local ring 0x%p\n",
-						sec_num, vcq->host_pa, host_ring_addr,
-						vqp->sq.local_cq_buff, local_ring_addr);
-#endif
-		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
-							  vqp->qp_mr->lkey, host_ring_addr,
-							  vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
-		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("roll back failed to second write back sq cqe, ret %d\n", ret);
-			return -1;
-		}
-		vqp->stats.sq_dma_tx_cnt++;
-	}
-
-	vqp->stats.sq_cq_write_cnt++;
-	vqp->stats.sq_cq_write_wqe += (uint64_t)cqe_num;
-	if (vqp->stats.sq_cq_write_cqe_max < cqe_num) {
-		vqp->stats.sq_cq_write_cqe_max = cqe_num;
-	}
-
-#ifdef WQE_DBG
-	SPDK_NOTICELOG("vrdam gen vsq cqe done: vcq new pi %d, write back vcqe num %d\n",
-					pi, cqe_num);
-#endif
-
-	return 0;
-}
+static int vrdma_write_back_sq_cqe(struct spdk_vrdma_qp *com_vqp,
+											uint16_t cqe_num);
 
 static void vrdma_vqp_mkey_err_cqe(struct spdk_vrdma_qp *vqp,
 								uint32_t opcode, uint16_t offset)
@@ -957,6 +841,7 @@ static int vrdma_rw_wqe_submit(struct vrdma_send_wqe *wqe,
 	if (spdk_unlikely(!r_mkey)) {
 		/* qp error state for invalid key */
 		vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, offset);
+		SPDK_ERRLOG("vqpn %d failed to get remote mkey, send err cqe\n", vqp->qp_idx);
 		return 0;
 	}
 	vqp->wait_vkey = wqe->rdma_rw.rkey;
@@ -1186,8 +1071,8 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 				return false;
 		}
 		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {
-			vqp->sq.comm.pre_pi += i;
-			_vrdma_qp_sm_poll_cq_ci(vqp, VRDMA_QP_SM_OP_OK, VRDMA_QP_STATE_MKEY_WAIT);
+			vqp->sq.comm.pre_pi += (i - 1); 
+			vrdma_tx_complete(backend_qp);
 			return true;
 		}
 	}
@@ -1347,7 +1232,7 @@ static inline struct mlx5_cqe64 *vrdma_poll_mqp_scq(struct snap_hw_cq *dv_cq,
 	return cqe;
 }
 
-static inline uint32_t vrdma_get_wqe_id(struct spdk_vrdma_qp *vqp, uint16_t mwqe_idx)
+static inline uint32_t vrdma_get_wqe_id(struct vrdma_backend_qp *mqp, uint16_t mwqe_idx)
 {
 	return be16toh(mwqe_idx);
 }
@@ -1362,7 +1247,7 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 		if (r_vkey->vkey_tbl.gid_ip == vqp->remote_gid_ip) {
 			if (r_vkey->vkey_tbl.vkey[vqp->wait_vkey].mkey) {
 				/* remote mkey found */
-				vqp->sq.comm.num_to_parse = vqp->qp_pi->pi.sq_pi - vqp->sq.comm.pre_pi;
+				vqp->sq.comm.num_to_parse = vqp->local_pi - vqp->sq.comm.pre_pi;
 				vqp->sm_state = VRDMA_QP_STATE_GEN_COMP;
 				vrdma_qp_wqe_sm_submit(vqp, status);
 				return true;
@@ -1374,10 +1259,10 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 	/* Waiting remote mkey*/
 	clock_gettime(CLOCK_REALTIME, &end_tv);
 	if ((end_tv.tv_sec - vqp->mkey_tv.tv_sec) > VRDMA_RPC_MKEY_TIMEOUT_S) {
-#ifdef WQE_DBG
+//#ifdef WQE_DBG
 		SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
 					(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
-#endif
+//#endif
 		/* qp error state for invalid key */
 		vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, 0);
 		return false;
@@ -1408,6 +1293,132 @@ static void vrdma_ring_mcq_db(struct snap_hw_cq *mcq)
 	SPDK_NOTICELOG("test update mcq ci %d\n", mcq->ci);
 #endif
 
+}
+
+static int vrdma_write_back_sq_cqe(struct spdk_vrdma_qp *com_vqp,
+											uint16_t cqe_num)
+{
+	struct spdk_vrdma_cq *vcq = com_vqp->sq_vcq;
+	uint32_t pi = 0;
+	uint32_t pre_pi = 0;
+	uint32_t cqe_idx =0;
+	uint32_t write_size = 0;
+	uint64_t host_ring_addr;
+	uint8_t *local_ring_addr;
+	uint32_t offset = 0;
+	uint16_t first_num = 0, sec_num = 0;
+	uint16_t q_size = vcq->cqe_entry_num;
+	int ret;
+	uint32_t i;
+	struct vrdma_cqe *vcqe;
+
+	clock_gettime(CLOCK_REALTIME, &g_cqe_tv);
+
+	cqe_idx = pre_pi = atomic_fetch_add_explicit(&vcq->pi, cqe_num, memory_order_relaxed);
+	pi = pre_pi + cqe_num;
+	/* setup owner bit */
+	for (i = 0; i < cqe_num; i++) {
+		vcqe = (struct vrdma_cqe *)com_vqp->sq.local_cq_buff + i;
+		/* owner bit should be alligned with provider side 
+		 * currently, provider side set this value to 0
+		 */
+		vcqe->owner = !((cqe_idx++) & (vcq->cqe_entry_num));
+	}
+#ifdef WQE_DBG
+	SPDK_NOTICELOG("vrdam write back cqe start: vcq pi %d, pre_pi %d, ci %d, owner %d\n",
+					pi, pre_pi, vcq->pici->ci, vcqe->owner);
+#endif
+	if (pi - vcq->pici->ci > vcq->cqe_entry_num) {
+		SPDK_ERRLOG("vcq is full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
+					pi, pre_pi, vcq->pici->ci);
+		return 0;
+	}
+
+#if 0
+	if (pi - vcq->pici->ci > (vcq->cqe_entry_num >> 1)) {
+		vrdma_qp_sm_poll_cq_ci(vqp, VRDMA_QP_SM_OP_OK);
+	}
+#endif
+	//fetch the delta PI number entry in one time
+	if (!vrdma_vq_rollback(pre_pi, pi, q_size)) {
+		com_vqp->q_comp.count = 1;
+		com_vqp->q_comp.func = vrdma_qp_sm_dma_cb;
+		write_size = cqe_num * vcq->cqebb_size;
+		offset = (pre_pi % q_size) * vcq->cqebb_size;
+		host_ring_addr = vcq->host_pa + offset;
+		local_ring_addr = (uint8_t *)((uint8_t *)com_vqp->sq.local_cq_buff);
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						cqe_num, vcq->host_pa, host_ring_addr,
+						com_vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(com_vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							com_vqp->qp_mr->lkey, host_ring_addr,
+							com_vqp->snap_queue->ctrl->xmkey->mkey, &com_vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		com_vqp->stats.sq_dma_tx_cnt++;
+	} else {
+		/* vq roll back case, first part */
+		com_vqp->q_comp.count = 1;
+		com_vqp->q_comp.func = vrdma_qp_sm_dma_cb;
+		first_num = q_size - (pre_pi % q_size);
+		write_size = first_num * vcq->cqebb_size;
+		offset = (pre_pi % q_size) * vcq->cqebb_size;
+		host_ring_addr = vcq->host_pa + offset;
+		local_ring_addr = (uint8_t *)((uint8_t *)com_vqp->sq.local_cq_buff);
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe first: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						first_num, vcq->host_pa, host_ring_addr,
+						com_vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(com_vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							com_vqp->qp_mr->lkey, host_ring_addr,
+							com_vqp->snap_queue->ctrl->xmkey->mkey, &com_vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		com_vqp->stats.sq_dma_tx_cnt++;
+		/* calculate second write size */
+		com_vqp->q_comp.count++;
+		com_vqp->q_comp.func = vrdma_qp_sm_dma_cb;
+		sec_num = pi % q_size;
+		write_size = sec_num * vcq->cqebb_size;
+		local_ring_addr = (uint8_t *)(com_vqp->sq.local_cq_buff + first_num);
+		host_ring_addr = vcq->host_pa;
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe second: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						sec_num, vcq->host_pa, host_ring_addr,
+						com_vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(com_vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							  com_vqp->qp_mr->lkey, host_ring_addr,
+							  com_vqp->snap_queue->ctrl->xmkey->mkey, &com_vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("roll back failed to second write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		com_vqp->stats.sq_dma_tx_cnt++;
+	}
+
+	com_vqp->stats.sq_cq_write_cnt++;
+	com_vqp->stats.sq_cq_write_wqe += (uint64_t)cqe_num;
+	if (com_vqp->stats.sq_cq_write_cqe_max < cqe_num) {
+		com_vqp->stats.sq_cq_write_cqe_max = cqe_num;
+	}
+
+#ifdef WQE_DBG
+	SPDK_NOTICELOG("vrdam gen vsq cqe done: vcq new pi %d, write back vcqe num %d\n",
+					pi, cqe_num);
+#endif
+	
+	return 0;
 }
 
 static inline vrdma_convet_mlx5_ibv_opcode(struct mlx5_cqe64 *cqe)
@@ -1465,7 +1476,7 @@ static bool vrdma_vqp_send_err_cqe(struct spdk_vrdma_qp *vqp)
 		vcqe->opcode = IBV_WC_RETRY_EXC_ERR;
 		cqe_num++;
 	}
-	ret = vrdma_write_back_sq_cqe(vqp, cqe_num);
+	ret = vrdma_write_back_sq_cqe(vqp,cqe_num);
 	if (spdk_unlikely(ret)) {
 		SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
 		vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
@@ -1474,23 +1485,22 @@ static bool vrdma_vqp_send_err_cqe(struct spdk_vrdma_qp *vqp)
 	return false;
 }
 
-#define POLL_CQ_NUM 1024
 static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
-									   enum vrdma_qp_sm_op_status status)
+									   				enum vrdma_qp_sm_op_status status)
 {
 	struct snap_hw_cq *mcq;
 	struct spdk_vrdma_cq *vcq;
 	struct mlx5_cqe64 *cqe;
 	struct vrdma_cqe *vcqe;
 	uint32_t wqe_idx;
-	uint32_t cqe_idx;
 	int ret = 0;
 	struct timeval tv;
 	uint32_t i;
 	uint16_t cqe_num = 0;
-	struct timespec start_tv;
+	struct timespec start_tv, end_tv;
 	struct mqp_sq_meta *sq_meta = NULL;
 	struct vrdma_backend_qp * mqp = NULL;
+	struct spdk_vrdma_qp *comp_vqp;
 
 	clock_gettime(CLOCK_REALTIME, &start_tv);
 #ifdef WQE_DBG
@@ -1524,37 +1534,52 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
 			SPDK_NOTICELOG("null MCQE: gotton mcqe num %d, ci %d\n",
 							cqe_num, vcq->pici->ci);
 #endif
-			goto ring_db;
+			goto null_cqe;
 		}
-		cqe_num++;
-		wqe_idx = vrdma_get_wqe_id(vqp, cqe->wqe_counter) & (mqp->bk_qp.hw_qp.sq.wqe_cnt - 1);
+		wqe_idx = vrdma_get_wqe_id(mqp, cqe->wqe_counter) & (mqp->bk_qp.hw_qp.sq.wqe_cnt - 1);
 		sq_meta = &mqp->sq_meta_buf[wqe_idx];
-		vqp = sq_meta->vqp;
-		if (!vqp) {
+		comp_vqp = sq_meta->vqp;
+		if (!comp_vqp) {
             SPDK_NOTICELOG("null vqp，vqp has been destroyed\n");
-            goto ring_db;
+            continue;
 		}
 		//cqe_idx = vcq->pi & (vcq->cqe_entry_num - 1);
-		vcqe = (struct vrdma_cqe *)vqp->sq.local_cq_buff;
+		vcqe = (struct vrdma_cqe *)comp_vqp->sq.local_cq_buff;
 		vcqe->imm_data = cqe->imm_inval_pkey;
 		vcqe->length = cqe->byte_cnt;
 		vcqe->req_id = sq_meta->req_id;
-		vcqe->local_qpn = vqp->qp_idx;
+		vcqe->local_qpn = comp_vqp->qp_idx;
 		//vcqe->ts = (uint32_t)cqe->timestamp;
 		vcqe->ts = (uint32_t)tv.tv_usec;
 		vcqe->opcode = vrdma_convet_mlx5_ibv_opcode(cqe);
 #ifdef WQE_DBG
-        SPDK_NOTICELOG("vrdam vqp=%p put cqe: cqe_idx %d, tqpn=%u, "
+        SPDK_NOTICELOG("vrdam vqp=%p put cqe: cq_idx %d, tqpn=%u, "
                        "wqe_cnt=%u, req_id %d, opcode %d\n",
-                       vqp, cqe_idx, sq_meta->vqp->qp_idx,
+                       vqp, vqp->sq_vcq->cq_idx, sq_meta->vqp->qp_idx,
                        mqp->bk_qp.hw_qp.sq.wqe_cnt,
                        vcqe->req_id, vcqe->opcode);
 #endif
-    write_vcq:
-        vqp->stats.mcq_dbred_ci = mcq->ci;
-        ret = vrdma_write_back_sq_cqe(vqp, 1);
-        mqp->bk_qp.sq_ci = vrdma_get_wqe_id(vqp, cqe->wqe_counter);
+        comp_vqp->stats.mcq_dbred_ci = mcq->ci;
+        ret = vrdma_write_back_sq_cqe(comp_vqp, 1);
+		if (spdk_unlikely(ret)) {
+            SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
+            vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
+            return true;
+        }
+        mqp->bk_qp.sq_ci = vrdma_get_wqe_id(mqp, cqe->wqe_counter);
+		vrdma_ring_mcq_db(mcq);
+		//vqp->sm_state = VRDMA_QP_STATE_GEN_COMP;
+		clock_gettime(CLOCK_REALTIME, &end_tv);
+
+		//SPDK_NOTICELOG("test each cqe handle time %lu\n", (end_tv.tv_nsec - start_tv.tv_nsec));
+		
+		return false;
 	}
+
+null_cqe:
+	return true;
+	
+#if 0
 ring_db:
     if (cqe_num) {
         vrdma_ring_mcq_db(mcq);
@@ -1562,10 +1587,16 @@ ring_db:
             SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
             vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
             return true;
-        } else
-            return false;
+        } else {
+			vqp->q_comp.count = dma_wqe_cnt;
+			if (dma_wqe_cnt > 100) 
+				SPDK_NOTICELOG("write cq CQE entry, dma wqe cnt %d\n", dma_wqe_cnt);
+			return false;
+		}
     }
     return true;
+#endif
+
 }
 
 static bool vrdma_qp_sm_fatal_error(struct spdk_vrdma_qp *vqp,
@@ -1647,7 +1678,7 @@ void vrdma_dpa_rx_cb(struct spdk_vrdma_qp *vqp,
 		return;
 	}
 #ifdef MPATH_DBG
-	SPDK_NOTICELOG("%s: vqp=0x%x get mqp=0x%x\n", __func__, vqp->qp_idx, vqp->bk_qp->bk_qp.qpnum);
+	//SPDK_NOTICELOG("%s: vqp=0x%x get mqp=0x%x\n", __func__, vqp->qp_idx, vqp->bk_qp->bk_qp.qpnum);
 #endif
 	vrdma_qp_wqe_sm_submit(vqp, status);
 }
@@ -1657,11 +1688,18 @@ void vrdma_qp_sm_dma_cb(struct snap_dma_completion *self, int status)
 	enum vrdma_qp_sm_op_status op_status = VRDMA_QP_SM_OP_OK;
 	struct spdk_vrdma_qp *vqp = container_of(self, struct spdk_vrdma_qp, q_comp);
 
+	return;
+
 	if (status != IBV_WC_SUCCESS) {
 		SPDK_ERRLOG("error in dma for vrdma sq state %d\n", vqp->sm_state);
 		op_status = VRDMA_QP_SM_OP_ERR;
 	}
 	vrdma_qp_wqe_progress(vqp, op_status);
+}
+
+void vrdma_qp_dummy_dma_cb(struct snap_dma_completion *self, int status)
+{
+	return;
 }
 
 void vrdma_qp_sm_init(struct spdk_vrdma_qp *vqp)
@@ -1684,17 +1722,17 @@ void vrdma_qp_sm_start(struct spdk_vrdma_qp *vqp)
 void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 									struct spdk_vrdma_qp *vqp)
 {
-
 	printf("\n========= vrdma qp debug counter =========\n");
-	printf("sf_name %s, gvmi 0x%x\n", ctrl->vdev->vrdma_sf.sf_name,
-										ctrl->vdev->vrdma_sf.gvmi);
+	printf("sf_name %s, gvmi 0x%x, spdk_core %d, pg_core %d\n", 
+			ctrl->vdev->vrdma_sf.sf_name, ctrl->vdev->vrdma_sf.gvmi,
+			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
 	if (vqp->pre_bk_qp)
 		printf("vqpn 0x%x, pre_bk_qp 0x%x\n", vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum);
 	printf("sq dma_q  0x%x\n", vqp->snap_queue->dma_q->sw_qp.dv_qp.hw_qp.qp_num);
 	printf("sq pi  %-10d       sq pre pi  %-10d\n",
 			vqp->qp_pi->pi.sq_pi, vqp->sq.comm.pre_pi);
-	printf("scq pi %-10d       scq ci %-10d\n",
-			vqp->sq_vcq->pi, vqp->sq_vcq->pici->ci);
+	printf("scq host cqe buff %-20lu     pi %-10d       scq ci %-10d\n",
+			vqp->sq_vcq->host_pa, vqp->sq_vcq->pi, vqp->sq_vcq->pici->ci);
 	printf("scq write cnt %-20lu       scq total wqe %-20lu     scq write max wqe %-10d\n",
 			vqp->stats.sq_cq_write_cnt, vqp->stats.sq_cq_write_wqe,
 			vqp->stats.sq_cq_write_cqe_max);
@@ -1725,24 +1763,339 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 	printf("l_vkey_idx 0x%x last_l_mkey 0x%x\n", vqp->last_l_vkey, vqp->last_l_mkey);
 
 	printf("\n========= dma qp(snap_queue) debug info =========\n");
-	if (vqp->snap_queue && vqp->snap_queue->dpa_vq && vqp->snap_queue->dma_q) {
+	if (vqp->snap_queue && vqp->dpa_vqp.dpa_thread && vqp->snap_queue->dma_q) {
 	// printf("emu_db_to_cq_id %#x, hw_dbcq %#x\n"
-		printf("hw_dbcq %#x\n"
+		printf("hw_dbcq %#x, dpa thread idx %d\n"
 			"sw_qp : %#x sqcq %#x rqcq %#x,\ndpa qp: %#x sqcq %#x rqcq %#x\n",
 			// vrdma_prov_get_emu_db_to_cq_id(vqp->snap_queue),
-			vqp->snap_queue->dpa_vq->db_cq.cq_num,
+			vqp->dpa_vqp.dpa_thread->dpa_handler->db_cq.cq_num,
+			vqp->dpa_vqp.dpa_thread->thread_idx,
 		 	vqp->snap_queue->dma_q->sw_qp.dv_qp.hw_qp.qp_num,
 		 	vqp->snap_queue->dma_q->sw_qp.dv_tx_cq.cq_num,
 		 	vqp->snap_queue->dma_q->sw_qp.dv_rx_cq.cq_num,
-			vqp->snap_queue->dpa_vq->dma_qp.qp_num,
-		 	vqp->snap_queue->dpa_vq->dma_q_sqcq.cq_num,
-		 	vqp->snap_queue->dpa_vq->dma_q_rqcq.cq_num);
-		vrdma_prov_vq_query(vqp->snap_queue);
+			vqp->dpa_vqp.dpa_thread->dpa_dma_qp->qp_num,
+		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_sqcq.cq_num,
+		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_rqcq.cq_num);
+		vrdma_prov_vq_query(vqp->dpa_vqp.dpa_thread);
 	} else {
 		printf("\nsnap_queue is %s, dpa_vq is %s, dma_q is %s\n",
 			vqp->snap_queue ? "not_null" : "null",
-			vqp->snap_queue->dpa_vq ? "not_null" : "null",
+			vqp->dpa_vqp.dpa_thread->dpa_dma_qp ? "not_null" : "null",
 			vqp->snap_queue->dma_q ? "not_null" : "null");
 	}
+}
+
+static void vrdma_qp_sm_poll_cq_ci_no_cb(struct spdk_vrdma_qp *vqp)
+{
+	int ret;
+	uint64_t ci_addr = vqp->sq_vcq->ci_pa;
+
+	clock_gettime(CLOCK_REALTIME, &g_end_tv);
+
+#ifdef POLL_PI_DBG
+	SPDK_NOTICELOG("vrdam poll sq vcq ci: doorbell pa 0x%lx\n", ci_addr);
+#endif
+	vqp->q_comp.func = vrdma_qp_dummy_dma_cb;
+	vqp->q_comp.count = 1;
+
+	ret = snap_dma_q_write(vqp->snap_queue->dma_q, (void *)ci_addr, sizeof(uint32_t),
+					  vqp->snap_queue->ctrl->xmkey->mkey, (uint64_t)&vqp->sq_vcq->pici->ci,
+					  vqp->sq_vcq->cqe_ci_mr->lkey, &vqp->q_comp);
+	if (spdk_unlikely(ret)) {
+		SPDK_ERRLOG("failed to read sq vcq CI, ret %d\n", ret);
+		vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
+		return;
+	}
+	vqp->stats.sq_dma_tx_cnt++;
+
+	return;
+}
+
+static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
+													uint16_t cqe_num)
+{
+	struct spdk_vrdma_cq *vcq = vqp->sq_vcq;
+	uint32_t pi = 0;
+	uint32_t pre_pi = 0;
+	uint32_t cqe_idx =0;
+	uint32_t write_size = 0;
+	uint64_t host_ring_addr;
+	uint8_t *local_ring_addr;
+	uint32_t offset = 0;
+	uint16_t first_num = 0, sec_num = 0;
+	uint16_t q_size = vcq->cqe_entry_num;
+	int ret;
+	uint32_t i;
+	struct vrdma_cqe *vcqe;
+
+	clock_gettime(CLOCK_REALTIME, &g_cqe_tv);
+
+	cqe_idx = pre_pi = atomic_fetch_add_explicit(&vcq->pi, cqe_num, memory_order_relaxed);
+	pi = pre_pi + cqe_num;
+	/* setup owner bit */
+	for (i = 0; i < cqe_num; i++) {
+		vcqe = (struct vrdma_cqe *)vqp->sq.local_cq_buff + i;
+		/* owner bit should be alligned with provider side 
+		 * currently, provider side set this value to 0
+		 */
+		vcqe->owner = !((cqe_idx++) & (vcq->cqe_entry_num));
+	}
+#ifdef WQE_DBG
+	SPDK_NOTICELOG("vrdam write back cqe start: vcq pi %d, pre_pi %d, ci %d, owner %d\n",
+					pi, pre_pi, vcq->pici->ci, vcqe->owner);
+#endif
+	if (pi - vcq->pici->ci > vcq->cqe_entry_num) {
+		SPDK_ERRLOG("vcq is full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
+					pi, pre_pi, vcq->pici->ci);
+		return 0;
+	}
+
+	if (pi - vcq->pici->ci > (vcq->cqe_entry_num >> 1)) {
+		vrdma_qp_sm_poll_cq_ci_no_cb(vqp);
+	}
+
+	//fetch the delta PI number entry in one time
+	if (!vrdma_vq_rollback(pre_pi, pi, q_size)) {
+		vqp->q_comp.count = 1;
+		vqp->q_comp.func = vrdma_qp_dummy_dma_cb;
+		write_size = cqe_num * vcq->cqebb_size;
+		offset = (pre_pi % q_size) * vcq->cqebb_size;
+		host_ring_addr = vcq->host_pa + offset;
+		local_ring_addr = (uint8_t *)((uint8_t *)vqp->sq.local_cq_buff);
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						cqe_num, vcq->host_pa, host_ring_addr,
+						vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							vqp->qp_mr->lkey, host_ring_addr,
+							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		vqp->stats.sq_dma_tx_cnt++;
+	} else {
+		/* vq roll back case, first part */
+		vqp->q_comp.count = 1;
+		vqp->q_comp.func = vrdma_qp_sm_dma_cb;
+		first_num = q_size - (pre_pi % q_size);
+		write_size = first_num * vcq->cqebb_size;
+		offset = (pre_pi % q_size) * vcq->cqebb_size;
+		host_ring_addr = vcq->host_pa + offset;
+		local_ring_addr = (uint8_t *)((uint8_t *)vqp->sq.local_cq_buff);
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe first: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						first_num, vcq->host_pa, host_ring_addr,
+						vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							vqp->qp_mr->lkey, host_ring_addr,
+							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		vqp->stats.sq_dma_tx_cnt++;
+
+		/* calculate second write size */
+		vqp->q_comp.count++;
+		vqp->q_comp.func = vrdma_qp_sm_dma_cb;
+		sec_num = pi % q_size;
+		write_size = sec_num * vcq->cqebb_size;
+		local_ring_addr = (uint8_t *)(vqp->sq.local_cq_buff + first_num);
+		host_ring_addr = vcq->host_pa;
+#ifdef WQE_DBG
+		SPDK_NOTICELOG("write cqe second: num %d host base addr 0x%lx host ring addr 0x%lx"
+						"local base 0x%p local ring 0x%p\n",
+						sec_num, vcq->host_pa, host_ring_addr,
+						vqp->sq.local_cq_buff, local_ring_addr);
+#endif
+		ret = snap_dma_q_write(vqp->snap_queue->dma_q, local_ring_addr, write_size,
+							  vqp->qp_mr->lkey, host_ring_addr,
+							  vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
+		if (spdk_unlikely(ret)) {
+			SPDK_ERRLOG("roll back failed to second write back sq cqe, ret %d\n", ret);
+			return -1;
+		}
+		vqp->stats.sq_dma_tx_cnt++;
+	}
+
+	vqp->stats.sq_cq_write_cnt++;
+	vqp->stats.sq_cq_write_wqe += (uint64_t)cqe_num;
+	if (vqp->stats.sq_cq_write_cqe_max < cqe_num) {
+		vqp->stats.sq_cq_write_cqe_max = cqe_num;
+	}
+
+#ifdef WQE_DBG
+	SPDK_NOTICELOG("vrdam gen vsq cqe done: vcq new pi %d, write back vcqe num %d\n",
+					pi, cqe_num);
+#endif
+	
+	return 0;
+}
+
+static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
+{
+	struct snap_hw_cq *mcq;
+	struct spdk_vrdma_cq *vcq;
+	struct mlx5_cqe64 *cqe;
+	struct vrdma_cqe *vcqe;
+	uint32_t wqe_idx;
+	int ret = 0;
+	uint32_t i;
+	uint16_t cqe_num = 0;
+	struct timespec start_tv, end_tv;
+	struct mqp_sq_meta *sq_meta = NULL;
+	struct spdk_vrdma_qp *comp_vqp;
+
+	clock_gettime(CLOCK_REALTIME, &start_tv);
+
+	if (spdk_unlikely(!bk_qp)) {
+		return;
+	}
+
+	mcq = &bk_qp->bk_qp.sq_hw_cq;
+	for (i = 0; i < POLL_CQ_NUM; i++) {
+		cqe = vrdma_poll_mqp_scq(mcq, SNAP_VRDMA_BACKEND_CQE_SIZE);
+		if (cqe == NULL) {
+			/* if no available cqe, need to write prepared vcqes*/
+#ifdef POLL_PI_DBG
+			SPDK_NOTICELOG("null MCQE: gotton mcqe num %d, ci %d\n",
+							cqe_num, vcq->pici->ci);
+#endif
+			goto null_cqe;
+		}
+		wqe_idx = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter) & (bk_qp->bk_qp.hw_qp.sq.wqe_cnt - 1);
+		sq_meta = &bk_qp->sq_meta_buf[wqe_idx];
+		comp_vqp = sq_meta->vqp;
+		if (!comp_vqp) {
+            SPDK_NOTICELOG("null vqp，vqp has been destroyed\n");
+            continue;
+		}
+		//cqe_idx = vcq->pi & (vcq->cqe_entry_num - 1);
+		vcqe = (struct vrdma_cqe *)comp_vqp->sq.local_cq_buff;
+		vcqe->imm_data = cqe->imm_inval_pkey;
+		vcqe->length = cqe->byte_cnt;
+		vcqe->req_id = sq_meta->req_id;
+		vcqe->local_qpn = comp_vqp->qp_idx;
+		//vcqe->ts = (uint32_t)cqe->timestamp;
+		vcqe->ts = (uint32_t)start_tv.tv_nsec;
+		vcqe->opcode = vrdma_convet_mlx5_ibv_opcode(cqe);
+#ifdef WQE_DBG
+        SPDK_NOTICELOG("vrdam vqp=%p put cqe: cq_idx %d, tqpn=%u, "
+                       "wqe_cnt=%u, req_id %d, opcode %d\n",
+                       comp_vqp, comp_vqp->sq_vcq->cq_idx, sq_meta->vqp->qp_idx,
+                       bk_qp->bk_qp.hw_qp.sq.wqe_cnt,
+                       vcqe->req_id, vcqe->opcode);
+#endif
+        comp_vqp->stats.mcq_dbred_ci = mcq->ci;
+        ret = vrdma_write_back_sq_cqe_no_cb(comp_vqp, 1);
+		if (spdk_unlikely(ret)) {
+            SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
+        }
+        bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter);
+		vrdma_ring_mcq_db(mcq);
+		clock_gettime(CLOCK_REALTIME, &end_tv);
+		//SPDK_NOTICELOG("test each cqe handle time %lu\n", (end_tv.tv_nsec - start_tv.tv_nsec));
+		return;
+	}
+
+null_cqe:
+	return;
+	
+#if 0
+ring_db:
+    if (cqe_num) {
+        vrdma_ring_mcq_db(mcq);
+        if (spdk_unlikely(ret)) {
+            SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
+            vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
+            return true;
+        } else {
+			vqp->q_comp.count = dma_wqe_cnt;
+			if (dma_wqe_cnt > 100) 
+				SPDK_NOTICELOG("write cq CQE entry, dma wqe cnt %d\n", dma_wqe_cnt);
+			return false;
+		}
+    }
+    return true;
+#endif
+
+}
+
+static int vrdma_handle_mkey_wait(struct spdk_vrdma_qp *vqp)
+{
+	struct vrdma_r_vkey *r_vkey, *vkey_tmp;
+	struct timespec end_tv;
+
+	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
+		if (r_vkey->vkey_tbl.gid_ip == vqp->remote_gid_ip) {
+			if (r_vkey->vkey_tbl.vkey[vqp->wait_vkey].mkey) {
+				/* remote mkey found */
+				vqp->sq.comm.num_to_parse = vqp->local_pi - vqp->sq.comm.pre_pi;
+				vqp->sm_state = VRDMA_QP_STATE_GEN_COMP;
+				vrdma_qp_wqe_sm_submit(vqp, VRDMA_QP_SM_OP_OK);
+				return 0;
+			}
+			break;
+		}
+	}
+
+	/* Waiting remote mkey*/
+	clock_gettime(CLOCK_REALTIME, &end_tv);
+	if ((end_tv.tv_sec - vqp->mkey_tv.tv_sec) > VRDMA_RPC_MKEY_TIMEOUT_S) {
+		SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
+					(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
+		/* qp error state for invalid key */
+		//vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, 0);
+		return -1;
+	}
+
+	return 0;
+
+}
+									
+static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
+{
+	uint16_t pi = vqp->qp_pi->pi.sq_pi;
+	uint16_t pre_pi = vqp->sq.comm.pre_pi;
+
+	if (spdk_unlikely(vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT)) {
+		vrdma_handle_mkey_wait(vqp);
+		return;
+	}
+	
+	if (pi == pre_pi) {
+		return;
+	}
+	vqp->local_pi = pi;
+	vqp->sq.comm.num_to_parse = pi - vqp->sq.comm.pre_pi;
+	vrdma_dpa_rx_cb(vqp, VRDMA_QP_SM_OP_OK);
+#if 0
+	SPDK_NOTICELOG("VRDMA: vqp %d, post wqe, pi %d, pre_pi %d, num_to_parse %d\n",
+					vqp->qp_idx, pi, pre_pi, vqp->sq.comm.num_to_parse);
+#endif
+}
+
+static void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp) 
+{
+	struct vrdma_backend_qp *bk_qp = vqp->bk_qp;
+
+	vrdma_qp_handle_completion(bk_qp);
+	/* handle dma cqe */
+	snap_dma_q_progress(vqp->snap_queue->dma_q);
+	//SPDK_NOTICELOG("VRDMA: poll cq, vqp idx %d\n",vqp->qp_idx);
+}
+
+void vrdma_qp_process(struct spdk_vrdma_qp *vqp)
+{
+	if (spdk_unlikely(!vqp)) {
+		return;
+	}
+	vrdma_qp_post_wqe(vqp);
+	vrdma_qp_poll_cq(vqp);
 }
 

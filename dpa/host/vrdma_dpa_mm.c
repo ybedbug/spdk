@@ -33,6 +33,8 @@ int vrdma_dpa_mm_zalloc(struct flexio_process *process, size_t buff_bsize,
 		goto err_memeset;
 	}
 
+	log_info("process %llx, get dpa addr %llx, input dpa addr pointer %llx", process, *dest_daddr_p, dest_daddr_p);
+
 	return 0;
 
 err_memeset:
@@ -188,12 +190,12 @@ void vrdma_dpa_mm_qp_buff_free(struct flexio_process *process,
 	vrdma_dpa_mm_free(process, buff_daddr);
 }
 
-int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_vq *dpa_vq,
-				flexio_uintptr_t *rq_daddr,
-				uint32_t num_of_wqes,
-				uint32_t wqe_stride,
-				uint32_t elem_size,
-				uint32_t mkey_id)
+int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
+									struct vrdma_dpa_dma_qp *dpa_dma_qp,
+									uint32_t num_of_wqes,
+									uint32_t wqe_stride,
+									uint32_t elem_size,
+									uint32_t mkey_id)
 {
 	struct mlx5_wqe_data_seg *rx_wqes;
 	struct mlx5_wqe_data_seg *dseg;
@@ -212,16 +214,16 @@ int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_vq *dpa_vq,
 
 	for (i = 0; i < num_of_wqes; i++) {
 		mlx5dv_set_data_seg(dseg, elem_size, mkey_id,
-				    dpa_vq->dma_qp.rx_wqe_buff +
+				    dpa_dma_qp->rx_wqe_buff +
 				    (i * elem_size));
 		dseg++;
 	}
 
 	/* Copy RX WQEs from host to dev memory */
-	err = flexio_host2dev_memcpy(dpa_vq->emu_dev_ctx->flexio_process,
+	err = flexio_host2dev_memcpy(emu_dev_ctx->flexio_process,
 				     rx_wqes,
 				     num_of_wqes * wqe_stride,
-				     *rq_daddr);
+				     dpa_dma_qp->rq_daddr);
 	if (err) {
 		log_error("Failed to copy qp_rq ring to dev, err(%d)", err);
 		goto err_dev_cpy;
@@ -229,9 +231,9 @@ int vrdma_dpa_init_qp_rx_ring(struct vrdma_dpa_vq *dpa_vq,
 
 	dbr[0] = htobe32(num_of_wqes & 0xffff);
 	dbr[1] = htobe32(0);
-	err = flexio_host2dev_memcpy(dpa_vq->emu_dev_ctx->flexio_process,
+	err = flexio_host2dev_memcpy(emu_dev_ctx->flexio_process,
 				     dbr, sizeof(dbr),
-				     dpa_vq->dma_qp.dbr_daddr);
+				     dpa_dma_qp->dbr_daddr);
 	if (err) {
 		log_error("Failed to copy from host to dev, err(%d)", err);
 		goto err_dev_cpy;
@@ -244,7 +246,7 @@ err_dev_cpy:
 	return err;
 }
 
-int vrdma_dpa_mkey_create(struct vrdma_dpa_vq *dpa_vq,
+int vrdma_dpa_mkey_create(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
 			    struct flexio_qp_attr *qp_attr,
 			    uint32_t data_bsize,
 				flexio_uintptr_t wqe_buff,
@@ -257,7 +259,7 @@ int vrdma_dpa_mkey_create(struct vrdma_dpa_vq *dpa_vq,
 	mkey_attr.pd = qp_attr->pd;
 	mkey_attr.daddr = wqe_buff;
 	mkey_attr.len = data_bsize;
-	err = flexio_device_mkey_create(dpa_vq->emu_dev_ctx->flexio_process,
+	err = flexio_device_mkey_create(emu_dev_ctx->flexio_process,
 					&mkey_attr, mkey);
 	if (err) {
 		log_error("Failed to create mkey, err(%d)", err);

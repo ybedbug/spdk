@@ -50,6 +50,7 @@
 #include "spdk/vrdma_srv.h"
 #include "spdk/vrdma_mr.h"
 #include "vrdma_providers.h"
+#include "spdk/vrdma_io_mgr.h"
 
 struct vrdma_dev_mac_list_head vrdma_dev_mac_list =
 				LIST_HEAD_INITIALIZER(vrdma_dev_mac_list);
@@ -166,18 +167,44 @@ void vrdma_ctrl_progress(void *arg)
 enum spdk_thread_poller_rc { SPDK_POLLER_IDLE , SPDK_POLLER_BUSY };
 #endif
 
+static inline struct spdk_vrdma_qp *
+vrmda_pg_q_entry_to_vrdma_qp(struct snap_pg_q_entry *pg_q)
+{
+	return container_of(pg_q, struct spdk_vrdma_qp, pg_q);
+}
+
 int vrdma_ctrl_progress_all_io(void *arg)
 {
     struct vrdma_ctrl *ctrl = arg;
+	int i;
+	int n = 0;
 
-    return snap_vrdma_ctrl_io_progress(ctrl->sctrl) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
+	for (i = 0; i < ctrl->sctrl->pg_ctx.npgs; i++) {
+		vrdma_ctrl_progress_io(arg, i);
+	}
+
+	return SPDK_POLLER_BUSY;
+
+    //return snap_vrdma_ctrl_io_progress(ctrl->sctrl) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 int vrdma_ctrl_progress_io(void *arg, int thread_id)
 {
     struct vrdma_ctrl *ctrl = arg;
+    struct snap_pg *pg = &ctrl->sctrl->pg_ctx.pgs[thread_id];
+    struct spdk_vrdma_qp *vq;
+	struct snap_pg_q_entry *pg_q;
 
-    return snap_vrdma_ctrl_io_progress_thread(ctrl->sctrl, thread_id) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
+	pthread_spin_lock(&pg->lock);
+  	TAILQ_FOREACH(pg_q, &pg->q_list, entry) {
+		vq = vrmda_pg_q_entry_to_vrdma_qp(pg_q);
+		vq->thread_id = thread_id;
+		vrdma_qp_process(vq);
+	}
+	pthread_spin_unlock(&pg->lock);
+	return SPDK_POLLER_BUSY;
+
+    //return snap_vrdma_ctrl_io_progress_thread(ctrl->sctrl, thread_id) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 void vrdma_ctrl_suspend(void *arg)
@@ -277,10 +304,10 @@ static int vrdma_device_start(void *arg)
 	attr.emu_ctx = ctrl->emu_ctx;
 	attr.emu_pd  = ctrl->pd;
     attr.emu_mgr_vhca_id = ctrl->sf_vhca_id;
-	SPDK_NOTICELOG("===naliu start test dev\n");
+	SPDK_NOTICELOG("start test dev for dpa\n");
 	err = vrdma_prov_init(&attr, &ctrl->dpa_ctx);
 	if (err) {
-		SPDK_NOTICELOG("===naliu vrdma_prov_init failed\n");
+		SPDK_NOTICELOG("vrdma_prov_init failed\n");
 		return err;
 	}
 
@@ -295,7 +322,7 @@ static int vrdma_device_start(void *arg)
 	err = vrdma_prov_emu_dev_init(&dev_init_attr, &ctrl->dpa_emu_dev_ctx);
 
 	if (err) {
-		SPDK_NOTICELOG("===naliu vrdma_prov_emu_dev_init0 failed\n");
+		SPDK_NOTICELOG("vrdma_prov_emu_dev_init0 failed\n");
 		goto err_prov_emu_dev_init;
 	}
     return 0;
@@ -426,7 +453,7 @@ vrdma_ctrl_init(const struct vrdma_ctrl_init_attr *attr)
     strncpy(ctrl->emu_manager, attr->emu_manager_name,
             SPDK_EMU_MANAGER_NAME_MAXLEN - 1);
     return ctrl;
-
+	
 dealloc_sf_pd:
     ibv_dealloc_pd(ctrl->vdev->vrdma_sf.sf_pd);
 sctrl_close:
@@ -473,7 +500,11 @@ void vrdma_ctrl_destroy(void *arg, void (*done_cb)(void *arg),
 {
     struct vrdma_ctrl *ctrl = arg;
 
+	if (!ctrl) {
+		return;
+	}
     snap_vrdma_ctrl_close(ctrl->sctrl);
+	vrdma_ctrl_destroy_dma_qp(ctrl);
     ctrl->sctrl = NULL;
     ctrl->destroy_done_cb = done_cb;
     ctrl->destroy_done_cb_arg = done_cb_arg;

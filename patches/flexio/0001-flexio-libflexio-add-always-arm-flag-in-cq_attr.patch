@@ -1,0 +1,39 @@
+From 5e53c8e6946481534402a110261646df581395fb Mon Sep 17 00:00:00 2001
+From: Lei Wang <leiwan@nvidia.com>
+Date: Tue, 28 Mar 2023 22:34:19 +0000
+Subject: [PATCH] flexio/libflexio: add always arm flag in cq_attr
+
+Signed-off-by: Lei Wang <leiwan@nvidia.com>
+---
+ libflexio/flexio.h        | 1 +
+ libflexio/src/flexio_cq.c | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/libflexio/flexio.h b/libflexio/flexio.h
+index 7bd1df1b..6ad867aa 100644
+--- a/libflexio/flexio.h
++++ b/libflexio/flexio.h
+@@ -144,6 +144,7 @@ struct flexio_cq_attr {
+ 	struct flexio_qmem cq_ring_qmem;
+ 	flexio_uintptr_t cq_dbr_daddr;
+ 	uint32_t overrun_ignore:1;
++	uint32_t always_armed:1;
+ };
+ 
+ struct flexio_wq_sq_attr {
+diff --git a/libflexio/src/flexio_cq.c b/libflexio/src/flexio_cq.c
+index 235baa10..16727137 100644
+--- a/libflexio/src/flexio_cq.c
++++ b/libflexio/src/flexio_cq.c
+@@ -222,6 +222,8 @@ flexio_status flexio_cq_create(struct flexio_process *process, struct ibv_contex
+ 
+ 	if (fattr->overrun_ignore)
+                prm_attr.oi = 1;
++	if (fattr->always_armed)
++	      prm_attr.always_armed = 1;
+ 
+ 	*cq_ptr = NULL;
+ 	cq = NULL;
+-- 
+2.34.1
+

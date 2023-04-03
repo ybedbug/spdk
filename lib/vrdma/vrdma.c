@@ -41,6 +41,7 @@
 #include "spdk/vrdma_rpc.h"
 #include "spdk/vrdma_admq.h"
 #include "spdk/vrdma_controller.h"
+#include "spdk/vrdma_mr.h"
 
 static uint32_t g_vdev_cnt;
 

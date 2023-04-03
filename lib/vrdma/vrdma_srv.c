@@ -262,7 +262,8 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
                        vqp->pre_bk_qp->poller_core);
     }
     /* init2rtr vqp join poller-group */
-    snap_vrdma_sched_vq_by_pg(ctrl->sctrl, vqp->snap_queue, pg);
+    //snap_vrdma_sched_vq_by_pg(ctrl->sctrl, vqp->snap_queue, pg);
+	vrdma_sched_vq(ctrl->sctrl, vqp);
     vrdma_qp_sm_start(vqp);
 	return 0;
 }

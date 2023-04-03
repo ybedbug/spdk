@@ -44,6 +44,7 @@
 #define VRDMA_EMU_NAME_MAXLEN 32
 #define VRDMA_DMA_ELEM_SIZE 64
 #define VRDMA_PCI_NAME_MAXLEN 16
+#define VRDMA_MAX_THREAD_NUM 32
 
 extern struct vrdma_state_machine vrdma_sm;
 
@@ -84,6 +85,7 @@ struct vrdma_ctrl {
 	const struct vRdmaServiceOps *srv_ops;
     void (*destroy_done_cb)(void *arg);
     void *destroy_done_cb_arg;
+	struct snap_vrdma_queue *sw_dma_q[VRDMA_MAX_THREAD_NUM];
 };
 
 struct vrdma_ctrl_init_attr {

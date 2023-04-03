@@ -34,21 +34,21 @@ void vrdma_dpa_cq_incr(struct vrdma_dpa_cq_ctx *cq_ctx, uint16_t mask)
 		cq_ctx->hw_owner_bit = !cq_ctx->hw_owner_bit;
 }
 
-volatile struct flexio_dev_cqe64 *
+struct flexio_dev_cqe64 *
 vrdma_dpa_cqe_get(struct vrdma_dpa_cq_ctx *cq_ctx, uint16_t mask)
 {
-	struct flexio_dev_cqe64 *cqe;
+	volatile struct flexio_dev_cqe64 *cqe;
 
-	cqe = &(cq_ctx->ring)[cq_ctx->ci & mask];
+	cqe = (volatile struct flexio_dev_cqe64 *)&(cq_ctx->ring)[cq_ctx->ci & mask];
 
-	if (vrdma_dpa_is_hw_owner(cq_ctx, cqe))
+	if (vrdma_dpa_is_hw_owner(cq_ctx, (struct flexio_dev_cqe64 *)cqe))
 		return NULL;
 
 	cq_ctx->ci++;
 	if ((cq_ctx->ci & mask) == 0)
 		cq_ctx->hw_owner_bit ^= 0x1;
 
-	return cqe;
+	return (struct flexio_dev_cqe64 *)cqe;
 }
 
 void vrdma_dpa_cq_wait(struct vrdma_dpa_cq_ctx *cq_ctx, uint16_t mask,

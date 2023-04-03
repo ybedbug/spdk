@@ -41,6 +41,8 @@
 #include "snap_dma.h"
 #include "snap_vrdma_virtq.h"
 
+#include "dpa/host/vrdma_dpa_vq.h"
+
 //#define CX7
 #define BF3
 
@@ -175,18 +177,18 @@ struct spdk_vrdma_cq {
 #define VRDMA_MAX_DMA_RQ_SIZE_PER_VQP 64
 
 enum vrdma_qp_sm_state_type {
-        VRDMA_QP_STATE_IDLE,
-        VRDMA_QP_STATE_POLL_PI,
-        VRDMA_QP_STATE_HANDLE_PI,
-        VRDMA_QP_STATE_WQE_READ,
-        VRDMA_QP_STATE_WQE_PARSE,
-        VRDMA_QP_STATE_WQE_MAP_BACKEND,
-        VRDMA_QP_STATE_WQE_SUBMIT,
-		VRDMA_QP_STATE_MKEY_WAIT,
-        VRDMA_QP_STATE_POLL_CQ_CI,
-        VRDMA_QP_STATE_GEN_COMP,
-        VRDMA_QP_STATE_FATAL_ERR,
-        VRDMA_QP_NUM_OF_STATES,
+        VRDMA_QP_STATE_IDLE = 0,
+        VRDMA_QP_STATE_POLL_PI = 1,
+        VRDMA_QP_STATE_HANDLE_PI = 2,
+        VRDMA_QP_STATE_WQE_READ = 3,
+        VRDMA_QP_STATE_WQE_PARSE = 4,
+        VRDMA_QP_STATE_WQE_MAP_BACKEND  = 5,
+        VRDMA_QP_STATE_WQE_SUBMIT = 6,
+		VRDMA_QP_STATE_MKEY_WAIT = 7,
+        VRDMA_QP_STATE_POLL_CQ_CI = 8,
+        VRDMA_QP_STATE_GEN_COMP = 9,
+        VRDMA_QP_STATE_FATAL_ERR = 10,
+        VRDMA_QP_NUM_OF_STATES = 11,
 };
 
 struct vrdma_qp_stats {
@@ -248,6 +250,11 @@ struct vrdma_vkey_tbl {
 
 struct spdk_vrdma_qp {
 	LIST_ENTRY(spdk_vrdma_qp) entry;
+	struct snap_pg_q_entry pg_q;
+	struct snap_pg *pg;
+	struct vrdma_dpa_vqp dpa_vqp;
+	flexio_uintptr_t dpa_heap_memory; /* qp ctx addr in device side */
+	uint32_t thread_id;
 	uint32_t qp_idx;
 	uint32_t ref_cnt;
 	uint32_t qp_state;
@@ -292,6 +299,7 @@ struct spdk_vrdma_qp {
 	struct ibv_mr *qp_mr;
 	union vrdma_align_pici *qp_pi;
 	struct vrdma_qp_stats stats;
+	uint16_t local_pi;
 };
 
 struct spdk_vrdma_dev {
