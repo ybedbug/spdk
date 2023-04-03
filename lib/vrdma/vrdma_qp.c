@@ -196,8 +196,7 @@ vrdma_mqp_del_vqp_from_list(struct vrdma_backend_qp *mqp,
 {
     struct vrdma_vqp *vqp_entry = NULL, *tmp;
 
-    SPDK_NOTICELOG("vqp=0x%x, mqp=%p", vqp_idx, mqp);
-    if(!mqp) return;
+	if(!mqp) return;
     LIST_FOREACH_SAFE(vqp_entry, &mqp->vqp_list, entry, tmp) {
         if (vqp_entry->qpn == vqp_idx) {
             LIST_REMOVE(vqp_entry, entry);
@@ -562,14 +561,10 @@ int vrdma_qp_notify_remote_by_rpc(struct vrdma_ctrl *ctrl,
 
 static struct snap_vrdma_queue *
 vrdma_ctrl_create_dma_qp(struct vrdma_ctrl *ctrl,
-									struct spdk_vrdma_qp *vqp,
-									int pg_id)
+									struct spdk_vrdma_qp *vqp)
 
 {
 	struct snap_vrdma_vq_create_attr q_attr = {0};
-	uint32_t rq_buff_size, sq_buff_size, q_buff_size;
-	uint32_t local_cq_size;
-	struct snap_vrdma_queue *snap_queue;
 
 	q_attr.bdev = NULL;
 	q_attr.pd = ctrl->pd;
@@ -580,11 +575,7 @@ vrdma_ctrl_create_dma_qp(struct vrdma_ctrl *ctrl,
 	q_attr.rx_cb = vrdma_dummy_rx_cb;
 
 	q_attr.vqpn = vqp->qp_idx;
-	snap_queue = ctrl->sctrl->q_ops->create(ctrl->sctrl, &q_attr);
-	if (!snap_queue) {
-		SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n");
-	}
-	return snap_queue;
+	return ctrl->sctrl->q_ops->create(ctrl->sctrl, &q_attr);
 }
 
 static struct snap_vrdma_queue *
@@ -593,9 +584,15 @@ vrdma_ctrl_find_dma_qp(struct vrdma_ctrl *ctrl,
 								int pg_id)
 {
 	struct snap_vrdma_queue *snap_queue;
+
+	if (!(pg_id < VRDMA_MAX_THREAD_NUM)) {
+		SPDK_ERRLOG("pg id is too large %d \n", 
+					pg_id);
+		return NULL;
+	}
 	
 	if (!ctrl->sw_dma_q[pg_id]) {
-		snap_queue = vrdma_ctrl_create_dma_qp(ctrl, vqp, pg_id);
+		snap_queue = vrdma_ctrl_create_dma_qp(ctrl, vqp);
 		if (!snap_queue) {
 			SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n", 
 						pg_id);

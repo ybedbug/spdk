@@ -85,7 +85,7 @@ struct vrdma_ctrl {
 	const struct vRdmaServiceOps *srv_ops;
     void (*destroy_done_cb)(void *arg);
     void *destroy_done_cb_arg;
-	struct snap_vrdma_qp_stat *sw_dma_q[VRDMA_MAX_THREAD_NUM];
+	struct snap_vrdma_queue *sw_dma_q[VRDMA_MAX_THREAD_NUM];
 };
 
 struct vrdma_ctrl_init_attr {
