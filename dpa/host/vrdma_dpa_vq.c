@@ -768,14 +768,15 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 	ret = vrdma_dpa_find_free_vqp_slot(dpa_thread->eh_ctx, &vqp_idx);
 	if (ret) {
 		log_error("no free vqp slot in thread");
-		return -1;
+		goto out;
 	}
 
 	/*prepare host and arm wr&pi address which used for rdma write*/
 	eh_qp_data = calloc(1, sizeof(*eh_qp_data));
 	if (!eh_qp_data) {
 		log_error("ctx data malloc failed, no more memory");
-		return -1;
+		ret = -1;
+		goto out;
 	}
 	eh_qp_data->emu_db_to_cq_id = attr->emu_db_handler;
 	eh_qp_data->vq_index = attr->vq_idx;
@@ -784,6 +785,7 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 	eh_qp_data->state = VRDMA_DPA_VQ_STATE_RDY;
 	eh_qp_data->eh_ctx_daddr = dpa_thread->heap_memory;
 	eh_qp_data->free_idx = vqp_idx;
+	vqp->dpa_vqp.ctx_idx = vqp_idx;
 	dpa_thread->eh_ctx->vqp_ctx[vqp_idx].valid = 1;
 
 	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
@@ -791,7 +793,8 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 				     			vqp->dpa_vqp.dpa_heap_memory);
 	if (err) {
 		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
-		return -1;
+		ret = -1;
+		goto free_memory;
 	}
 
 	err = flexio_process_call(dpa_thread->dpa_ctx->flexio_process,
@@ -803,13 +806,72 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 		if (flexio_err_status(dpa_thread->dpa_ctx->flexio_process)) {
 			flexio_coredump_create(dpa_thread->dpa_ctx->flexio_process, "/images/flexio.core");
 		}
+		ret = -1;
+		goto free_memory;
 	}
 
 	log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
 				  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
 
-	return 0;
+free_memory:
+	free(eh_qp_data);
+out:
+	return ret;
 }
+
+static int
+vrdma_dpa_vq_ctx_release(struct spdk_vrdma_qp *vqp)
+{
+	struct vrdma_dpa_vqp_ctx *eh_qp_data;
+	struct vrdma_dpa_thread_ctx *dpa_thread;;
+	flexio_status err;
+	uint64_t rpc_ret;
+	int ret = 0;
+
+	if (!vqp || vqp->dpa_vqp.dpa_thread) {
+		return;
+	}
+	dpa_thread = vqp->dpa_vqp.dpa_thread;
+	eh_qp_data = calloc(1, sizeof(*eh_qp_data));
+	if (!eh_qp_data) {
+		log_error("ctx data malloc failed, no more memory");
+		ret = -1;
+		goto out;
+	}
+	eh_qp_data->state = VRDMA_DPA_VQ_STATE_SUSPEND;
+	dpa_thread->eh_ctx->vqp_ctx[vqp->dpa_vqp.ctx_idx].valid = 0;
+
+	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
+				     			&eh_qp_data->state, sizeof(eh_qp_data->state),
+				     			vqp->dpa_vqp.dpa_heap_memory);
+	if (err) {
+		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
+		ret = -1;
+		goto free_memory;
+	}
+
+	err = flexio_process_call(dpa_thread->dpa_ctx->flexio_process,
+					  dpa_thread->dpa_ctx->vq_rpc_func[VRDMA_DPA_VQ_QP],
+					  &rpc_ret, vqp->dpa_vqp.dpa_heap_memory);
+	if (err) {
+		log_error("Failed to call rpc, err(%d), rpc_ret(%ld)",
+				  err, rpc_ret);
+		if (flexio_err_status(dpa_thread->dpa_ctx->flexio_process)) {
+			flexio_coredump_create(dpa_thread->dpa_ctx->flexio_process, "/images/flexio.core");
+		}
+		ret = -1;
+		goto free_memory;
+	}
+
+	log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
+				  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
+
+free_memory:
+	free(eh_qp_data);
+out:
+	return ret;
+}
+
 
 static int vrdma_dpa_vqp_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
 											struct vrdma_dpa_thread_ctx *dpa_thread)
@@ -936,8 +998,11 @@ vrdma_dpa_handler_destroy(struct vrdma_dpa_handler *dpa_handler,
 	if (!dpa_handler) {
 		return;
 	}
+	
 	vrdma_dpa_msix_destroy(dpa_handler->sq_msix_vector, emu_dev_ctx);
-	vrdma_dpa_msix_destroy(dpa_handler->rq_msix_vector, emu_dev_ctx);
+	if (dpa_handler->sq_msix_vector != dpa_handler->rq_msix_vector) {
+		vrdma_dpa_msix_destroy(dpa_handler->rq_msix_vector, emu_dev_ctx);
+	}
 	vrdma_dpa_db_cq_destroy(dpa_handler, emu_dev_ctx);
 	vrdma_dpa_db_handler_uninit(dpa_handler);
 	free(dpa_handler);
@@ -1052,6 +1117,9 @@ vrdma_dpa_dma_qp_destroy(struct vrdma_dpa_dma_qp *dpa_dma_qp,
 	vrdma_dpa_mm_free(emu_dev_ctx->flexio_process, dpa_dma_qp->rx_wqe_buff);
 	vrdma_dpa_mm_free(emu_dev_ctx->flexio_process, dpa_dma_qp->dbr_daddr);
 	vrdma_dpa_mm_qp_buff_free(emu_dev_ctx->flexio_process, dpa_dma_qp->buff_daddr);
+	vrdma_dpa_dma_q_cq_destroy(dpa_dma_qp, emu_dev_ctx);
+	free(dpa_dma_qp);
+	
 }
 
 static inline void 
@@ -1155,7 +1223,6 @@ vrdma_dpa_thread_ctx_get_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *v
 	/* Todo: later need confirm, because in snap_vrdma_vq_create: virtq->pd = q_attr->pd;*/
 	dpa_thread->sw_dma_qp->pd = ctrl->pd;
 	dpa_thread->sw_dma_qp->dma_mkey = ctrl->sctrl->xmkey->mkey;
-	TAILQ_INSERT_TAIL(&ctrl->sctrl->virtqs, dpa_thread->sw_dma_qp, vq);
 	
 	return dpa_thread;
 
@@ -1177,31 +1244,33 @@ static void
 vrdma_dpa_thread_ctx_destroy(struct vrdma_dpa_thread_ctx *dpa_thread)
 {
 	vrdma_dpa_dma_qp_destroy(dpa_thread->dpa_dma_qp, dpa_thread->emu_dev_ctx);
-	vrdma_dpa_dma_q_cq_destroy(dpa_thread->dpa_dma_qp, dpa_thread->emu_dev_ctx);
-	vrdma_dpa_msix_destroy(dpa_thread->dpa_handler->sq_msix_vector,
-							dpa_thread->emu_dev_ctx);
-	if (dpa_thread->dpa_handler->sq_msix_vector !=
-		dpa_thread->dpa_handler->rq_msix_vector) {
-		vrdma_dpa_msix_destroy(dpa_thread->dpa_handler->rq_msix_vector,
-								dpa_thread->emu_dev_ctx);
-	}
-	vrdma_dpa_db_cq_destroy(dpa_thread->dpa_handler, dpa_thread->emu_dev_ctx);
-	flexio_event_handler_destroy(dpa_thread->dpa_handler->rq_dma_q_handler);
-	flexio_event_handler_destroy(dpa_thread->dpa_handler->db_handler);
+	vrdma_sw_dma_qp_destroy(dpa_thread->sw_dma_qp);
+	vrdma_dpa_handler_destroy(dpa_thread->dpa_handler, dpa_thread->emu_dev_ctx);
+	free(dpa_thread->eh_ctx);
 	vrdma_dpa_mm_free(dpa_thread->dpa_ctx->flexio_process,
 			    		dpa_thread->heap_memory);
 }
 
 static void vrdma_dpa_vqp_destroy(struct spdk_vrdma_qp *vqp)
 {
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+
+	if (!vqp || !vqp->dpa_vqp.dpa_thread) {
+		return;
+	}
+	dpa_thread = vqp->dpa_vqp.dpa_thread;
 	if (mlx_devx_emu_db_to_cq_unmap(vqp->dpa_vqp.devx_emu_db_to_cq_ctx)) {
 		SPDK_ERRLOG("vqp index %d unmap db cq failed, dbr idx %d\n", 
 					vqp->qp_idx, vqp->dpa_vqp.emu_db_to_cq_id);
 		return;
 	}
+	vrdma_dpa_vq_ctx_release(vqp);
+	vrdma_dpa_mm_free(dpa_thread->dpa_ctx->flexio_process, 
+						vqp->dpa_vqp.dpa_heap_memory);
 	vqp->dpa_vqp.dpa_thread->attached_vqp_num--;
-	if (!vqp->dpa_vqp.dpa_thread->attached_vqp_num) {
-		vrdma_dpa_thread_ctx_destroy(vqp->dpa_vqp.dpa_thread);
+	if (!dpa_thread->attached_vqp_num) {
+		vrdma_dpa_thread_ctx_destroy(dpa_thread);
+		memset(vqp->dpa_vqp.dpa_thread, 0, sizeof(*dpa_thread));
 	}
 }
 

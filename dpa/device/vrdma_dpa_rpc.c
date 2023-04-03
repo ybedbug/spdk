@@ -67,7 +67,8 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	struct vrdma_dpa_event_handler_ctx *ectx;
 	struct vrdma_dpa_vqp_ctx *vqp_ctx;
 	struct flexio_dev_thread_ctx *dtctx;
-	int free_idx;
+	uint16_t free_idx;
+	uint16_t valid = 0;
 	
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	printf("\n vrdma_qp_rpc_handler start\n");
@@ -77,6 +78,24 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	ectx = (struct vrdma_dpa_event_handler_ctx *)vqp_ctx->eh_ctx_daddr;
 
 	/* insert new added vqp to thread ctx */
+	free_idx = vqp_ctx->free_idx;
+	if (!(vqp_ctx->free_idx < VQP_PER_THREAD)) {
+		printf("vrdma_qp_rpc_handler wrong vqp slot %d\n", vqp_ctx->free_idx);
+		return 0;
+	}
+	switch (vqp_ctx->state) {
+			case VRDMA_DPA_VQ_STATE_RDY:
+				valid = 1;
+				break;
+			case VRDMA_DPA_VQ_STATE_SUSPEND:
+			case VRDMA_DPA_VQ_STATE_INIT:
+			case VRDMA_DPA_VQ_STATE_ERR:
+				valid = 0;
+				break;
+			default:
+				break;
+	}
+	
 	spin_lock(&ectx->vqp_array_lock);
 #if 0
 	free_idx = vrdma_dpa_get_free_vqp_slot(ectx);
@@ -86,15 +105,14 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 		return 0;
 	}
 #endif
-	free_idx = vqp_ctx->free_idx;
 	ectx->vqp_ctx[free_idx].emu_db_handle = vqp_ctx->emu_db_to_cq_id;
-	ectx->vqp_ctx[free_idx].valid = 1;
+	ectx->vqp_ctx[free_idx].valid = valid;
 	ectx->vqp_ctx[free_idx].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
 	ectx->vqp_count++;
 	ectx->dma_qp.state = VRDMA_DPA_VQ_STATE_RDY;
-	vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
 	fence_rw();
 	spin_unlock(&ectx->vqp_array_lock);
+	vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	printf("\n vrdma_qp_rpc_handler get free idx %d, db handle %d, vqp_ctx_handle %llx, vqp idx %d\n",
 			free_idx, vqp_ctx->emu_db_to_cq_id, (flexio_uintptr_t)vqp_ctx, vqp_ctx->vq_index);

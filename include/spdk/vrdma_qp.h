@@ -143,5 +143,7 @@ static inline int vrdma_vq_rollback(uint16_t pre_pi, uint16_t pi,
 void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 				     	struct spdk_vrdma_qp *vq);
 void vrdma_desched_vq(struct spdk_vrdma_qp *vq);
+void vrdma_ctrl_destroy_dma_qp(struct vrdma_ctrl *ctrl);
+
 
 #endif

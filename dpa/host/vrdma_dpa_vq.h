@@ -123,6 +123,7 @@ struct vrdma_dpa_thread_ctx {
 struct vrdma_dpa_vqp {
 	flexio_uintptr_t dpa_heap_memory; /* qp ctx addr in device side */
 	uint32_t emu_db_to_cq_id;
+	uint32_t ctx_idx;
 	struct mlx5dv_devx_obj *devx_emu_db_to_cq_ctx;
 	struct vrdma_dpa_thread_ctx *dpa_thread;
 };

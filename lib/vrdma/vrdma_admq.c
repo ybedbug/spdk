@@ -57,6 +57,8 @@ static uint32_t g_vqp_cnt;
 static uint32_t g_vcq_cnt;
 static uint32_t g_veq_cnt;
 
+//#define ADMQ_DP_DEBUG
+
 static struct spdk_bit_array *
 spdk_vrdma_create_id_pool(uint32_t max_num)
 {
@@ -1300,6 +1302,78 @@ static void vrdma_aq_destroy_ah(struct vrdma_ctrl *ctrl,
 	aqe->resp.destroy_ah_resp.err_code = VRDMA_AQ_MSG_ERR_CODE_SUCCESS;
 }
 
+static char * get_admq_msg_opcode(uint32_t opcode)
+{
+	char *opcode_str;
+	
+	switch(opcode) {
+			case VRDMA_ADMIN_OPEN_DEVICE:
+				opcode_str = "open device";
+				break;
+			case VRDMA_ADMIN_QUERY_DEVICE:
+				opcode_str = "query device";
+				break;
+			case VRDMA_ADMIN_QUERY_PORT:
+				opcode_str = "query port";
+				break;
+			case VRDMA_ADMIN_QUERY_GID:
+				opcode_str = "query gid";
+				break;
+			case VRDMA_ADMIN_MODIFY_GID:
+				opcode_str = "modify gid";
+				break;
+			case VRDMA_ADMIN_CREATE_PD:
+				opcode_str = "create pd";
+				break;
+			case VRDMA_ADMIN_DESTROY_PD:
+				opcode_str = "destroy pd";
+				break;
+			case VRDMA_ADMIN_REG_MR:
+				opcode_str = "register mr";
+				break;
+			case VRDMA_ADMIN_DEREG_MR:
+				opcode_str = "deregister mr";
+				break;
+			case VRDMA_ADMIN_CREATE_CQ:
+				opcode_str = "create cq";
+				break;
+			case VRDMA_ADMIN_DESTROY_CQ:
+				opcode_str = "destroy cq";
+				break;
+			case VRDMA_ADMIN_CREATE_QP:
+				opcode_str = "create qp";
+				break;
+			case VRDMA_ADMIN_DESTROY_QP:
+				opcode_str = "destroy qp";
+				break;
+			case VRDMA_ADMIN_QUERY_QP:
+				opcode_str = "query qp";
+				break;
+			case VRDMA_ADMIN_MODIFY_QP:
+				opcode_str = "modify qp";
+				break;
+			case VRDMA_ADMIN_CREATE_CEQ:
+				opcode_str = "create ceq";
+				break;
+			case VRDMA_ADMIN_MODIFY_CEQ:
+				opcode_str = "modify ceq";
+				break;
+			case VRDMA_ADMIN_DESTROY_CEQ:
+				opcode_str = "destroy ceq";
+				break;
+			case VRDMA_ADMIN_CREATE_AH:
+				opcode_str = "create ah";
+				break;
+			case VRDMA_ADMIN_DESTROY_AH:
+				opcode_str = "destroy ah";
+				break;
+			default:
+				opcode_str = "unsupported msg";	 
+	}
+
+	return opcode_str;
+}
+
 int vrdma_parse_admq_entry(struct vrdma_ctrl *ctrl,
 			struct vrdma_admin_cmd_entry *aqe)
 {
@@ -1309,7 +1383,7 @@ int vrdma_parse_admq_entry(struct vrdma_ctrl *ctrl,
 		return -1;
 	}
 
-	SPDK_NOTICELOG("entry opcode %d\n", aqe->hdr.opcode);
+	SPDK_NOTICELOG("entry opcode: %s\n", get_admq_msg_opcode(aqe->hdr.opcode));
 	switch (aqe->hdr.opcode) {
 			case VRDMA_ADMIN_OPEN_DEVICE:
 				vrdma_aq_open_dev(ctrl, aqe);
@@ -1462,8 +1536,10 @@ static bool vrdma_aq_sm_read_cmd(struct vrdma_admin_sw_qp *aq,
 	aq->state = VRDMA_CMD_STATE_PARSE_CMD_ENTRY;
 	aq->num_to_parse = pi - aq->admq->ci;
 
+#ifdef ADMQ_DP_DEBUG
 	SPDK_NOTICELOG("vrdam poll admin cmd: admq pa 0x%lx, pi %d, ci %d\n",
 			ctrl->sctrl->bar_curr->adminq_base_addr, pi, aq->admq->ci);
+#endif
 
 	//fetch the delta PI number entry in one time
 	if (!vrdma_aq_rollback(aq, pi, q_size)) {
@@ -1593,8 +1669,10 @@ static bool vrdma_aq_sm_write_cmd(struct vrdma_admin_sw_qp *aq,
 
 	host_ring_addr = ctrl->sctrl->bar_curr->adminq_base_addr +
 		             offsetof(struct vrdma_admin_queue, ring);
+#ifdef ADMQ_DP_DEBUG
 	SPDK_NOTICELOG("vrdam write admin cmd: admq pa 0x%lx, num_to_write %d, old ci %d, pi %d\n", 
 			ctrl->sctrl->bar_curr->adminq_base_addr, num_to_write, ci, aq->admq->pi);
+#endif
 
 	if (!num_to_write) {
 		aq->state = VRDMA_CMD_STATE_FATAL_ERR;
@@ -1667,9 +1745,10 @@ static bool vrdma_aq_sm_update_ci(struct vrdma_admin_sw_qp *aq,
 		aq->state = VRDMA_CMD_STATE_FATAL_ERR;
 		return true;
 	}
-
+#ifdef ADMQ_DP_DEBUG
 	SPDK_NOTICELOG("vrdam update admq CI: admq pa 0x%lx, new ci %d\n",
 					ctrl->sctrl->bar_curr->adminq_base_addr, aq->admq->ci);
+#endif
 
 	aq->state = VRDMA_CMD_STATE_POLL_PI;
 	aq->poll_comp.count = 1;

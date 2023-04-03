@@ -358,33 +358,11 @@ void vrdma_destroy_backend_qp(struct vrdma_backend_qp **mqp)
     *mqp = NULL;
 }
 
-static void vrdma_vqp_rx_cb(struct snap_dma_q *q, const void *data,
-									uint32_t data_len, uint32_t imm_data)
+static void 
+vrdma_dummy_rx_cb(struct snap_dma_q *q, const void *data, 
+						uint32_t data_len, uint32_t imm_data)
 {
-	uint16_t pi = be32toh(imm_data) & 0xFFFF;
-	uint16_t vqpn = (be32toh(imm_data) >> 16) & 0xFFFF;
-	struct spdk_vrdma_qp *vqp;
-	struct snap_vrdma_queue *snap_vqp;
-
-	return;
-
-	snap_vqp = (struct snap_vrdma_queue *)q->uctx;
-
-	if (snap_vqp && snap_vqp->swq_state == SW_VIRTQ_FLUSHING) {
-		return;
-	}
-	vqp = (struct spdk_vrdma_qp *)snap_vqp->ctx;
-	vqp->qp_pi->pi.sq_pi = pi;
-	vqp->sq.comm.num_to_parse = pi - vqp->sq.comm.pre_pi;
-	if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT)
-		return;
-#ifdef NO_PERF_DEBUG
-	SPDK_NOTICELOG("VRDMA: rx cb started, pi %d, num_to_parse %d\n", pi, vqp->sq.comm.num_to_parse);
-#endif
-	vrdma_dpa_rx_cb(vqp, VRDMA_QP_SM_OP_OK);
-#ifdef NO_PERF_DEBUG
-	SPDK_NOTICELOG("VRDMA: rx cb done, imm_data 0x%x\n", imm_data);
-#endif
+	snap_error("VRDMA: rx cb called\n");
 }
 
 int vrdma_create_vq(struct vrdma_ctrl *ctrl,
@@ -404,7 +382,7 @@ int vrdma_create_vq(struct vrdma_ctrl *ctrl,
 	q_attr.tx_elem_size = VRDMA_DMA_ELEM_SIZE;
 	q_attr.rx_elem_size = VRDMA_DMA_ELEM_SIZE;
 	q_attr.vqpn = vqp->qp_idx;
-	q_attr.rx_cb = vrdma_vqp_rx_cb;
+	q_attr.rx_cb = vrdma_dummy_rx_cb;
 
 	if (!ctrl->dpa_enabled) {
 		vqp->snap_queue = ctrl->sctrl->q_ops->create(ctrl->sctrl, &q_attr);
@@ -461,10 +439,9 @@ int vrdma_create_vq(struct vrdma_ctrl *ctrl,
 				vqp->qp_idx, vqp->qdb_idx, vqp->qp_mr->lkey, vqp->qp_mr->rkey);
 		dpa_thread = vrdma_prov_thread_ctx_create(ctrl, vqp, &q_attr);
 		if (dpa_thread) {
-			vqp->snap_queue = dpa_thread->sw_dma_qp;
-			vqp->snap_queue->ctx = vqp;
 			vrdma_prov_vq_map_to_thread(ctrl, vqp, dpa_thread);
-			SPDK_NOTICELOG("vrdma_create_vq...end\n");
+			SPDK_NOTICELOG("vrdma_create_vq end, binded to dpa_thread %d\n",
+							dpa_thread->thread_idx);
 		} else {
 			SPDK_ERRLOG("vrdma_create_vq...fail\n");
 			return -1;
@@ -583,21 +560,86 @@ int vrdma_qp_notify_remote_by_rpc(struct vrdma_ctrl *ctrl,
 	return 0;
 }
 
-static void vrdma_sched_vq_nolock(struct snap_vrdma_ctrl *ctrl,
+static struct snap_vrdma_queue *
+vrdma_ctrl_create_dma_qp(struct vrdma_ctrl *ctrl,
+									struct spdk_vrdma_qp *vqp,
+									int pg_id)
+
+{
+	struct snap_vrdma_vq_create_attr q_attr = {0};
+	uint32_t rq_buff_size, sq_buff_size, q_buff_size;
+	uint32_t local_cq_size;
+	struct snap_vrdma_queue *snap_queue;
+
+	q_attr.bdev = NULL;
+	q_attr.pd = ctrl->pd;
+	q_attr.sq_size = VRDMA_MAX_DMA_SQ_SIZE_PER_VQP;
+	q_attr.rq_size = VRDMA_MAX_DMA_RQ_SIZE_PER_VQP;
+	q_attr.tx_elem_size = VRDMA_DMA_ELEM_SIZE;
+	q_attr.rx_elem_size = VRDMA_DMA_ELEM_SIZE;
+	q_attr.rx_cb = vrdma_dummy_rx_cb;
+
+	q_attr.vqpn = vqp->qp_idx;
+	snap_queue = ctrl->sctrl->q_ops->create(ctrl->sctrl, &q_attr);
+	if (!snap_queue) {
+		SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n");
+	}
+	return snap_queue;
+}
+
+static struct snap_vrdma_queue *
+vrdma_ctrl_find_dma_qp(struct vrdma_ctrl *ctrl,
+								struct spdk_vrdma_qp *vqp,
+								int pg_id)
+{
+	struct snap_vrdma_queue *snap_queue;
+	
+	if (!ctrl->sw_dma_q[pg_id]) {
+		snap_queue = vrdma_ctrl_create_dma_qp(ctrl, vqp, pg_id);
+		if (!snap_queue) {
+			SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n", 
+						pg_id);
+			return NULL;
+		}
+		ctrl->sw_dma_q[pg_id] = snap_queue;
+	}
+	
+	return ctrl->sw_dma_q[pg_id];
+}
+
+static void
+sw_dma_qp_destroy(struct snap_vrdma_queue *sw_dma_qp)
+{
+	if (!sw_dma_qp) {
+		return;
+	}
+	if (sw_dma_qp->dma_q) {
+		snap_dma_ep_destroy(sw_dma_qp->dma_q);
+	}
+	free(sw_dma_qp);
+}
+									
+static int vrdma_sched_vq_nolock(struct snap_vrdma_ctrl *ctrl,
 					    struct spdk_vrdma_qp *vq,
 					    struct snap_pg *pg)
-{
+{	
 	TAILQ_INSERT_TAIL(&pg->q_list, &vq->pg_q, entry);
 	vq->pg = pg;
+	return 0;
 }
 
 void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 				     struct spdk_vrdma_qp *vq)
 {
 	struct snap_pg *pg;
+	struct vrdma_ctrl *v_ctrl = ctrl->cb_ctx;
 
 	pg = snap_pg_get_next(&ctrl->pg_ctx);
-
+	vq->snap_queue = vrdma_ctrl_find_dma_qp(v_ctrl, vq, pg->id);
+	if (!vq->snap_queue) {
+		SPDK_ERRLOG("VRDMA queue %d failed to join scheduler\n", vq->qp_idx);
+		return;
+	}
 	pthread_spin_lock(&pg->lock);
 	vrdma_sched_vq_nolock(ctrl, vq, pg);
 	SPDK_NOTICELOG("VRDMA queue sched polling group id = %d\n", vq->pg->id);
@@ -629,3 +671,14 @@ void vrdma_desched_vq(struct spdk_vrdma_qp *vq)
 	pthread_spin_unlock(&pg->lock);
 }
 
+void vrdma_ctrl_destroy_dma_qp(struct vrdma_ctrl *ctrl)
+
+{
+	uint16_t thread;
+
+	for (thread = 0; thread < VRDMA_MAX_THREAD_NUM; thread++) {
+		if (ctrl->sw_dma_q[thread]) {
+			sw_dma_qp_destroy(ctrl->sw_dma_q[thread]);
+		}
+	}
+}

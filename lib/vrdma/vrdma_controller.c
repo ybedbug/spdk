@@ -198,7 +198,7 @@ int vrdma_ctrl_progress_io(void *arg, int thread_id)
 	pthread_spin_lock(&pg->lock);
   	TAILQ_FOREACH(pg_q, &pg->q_list, entry) {
 		vq = vrmda_pg_q_entry_to_vrdma_qp(pg_q);
- 	 	vq->thread_id = thread_id;
+		vq->thread_id = thread_id;
 		vrdma_qp_process(vq);
 	}
 	pthread_spin_unlock(&pg->lock);
@@ -453,7 +453,7 @@ vrdma_ctrl_init(const struct vrdma_ctrl_init_attr *attr)
     strncpy(ctrl->emu_manager, attr->emu_manager_name,
             SPDK_EMU_MANAGER_NAME_MAXLEN - 1);
     return ctrl;
-
+	
 dealloc_sf_pd:
     ibv_dealloc_pd(ctrl->vdev->vrdma_sf.sf_pd);
 sctrl_close:
@@ -500,7 +500,11 @@ void vrdma_ctrl_destroy(void *arg, void (*done_cb)(void *arg),
 {
     struct vrdma_ctrl *ctrl = arg;
 
+	if (!ctrl) {
+		return;
+	}
     snap_vrdma_ctrl_close(ctrl->sctrl);
+	vrdma_ctrl_destroy_dma_qp(ctrl);
     ctrl->sctrl = NULL;
     ctrl->destroy_done_cb = done_cb;
     ctrl->destroy_done_cb_arg = done_cb_arg;

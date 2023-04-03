@@ -177,18 +177,18 @@ struct spdk_vrdma_cq {
 #define VRDMA_MAX_DMA_RQ_SIZE_PER_VQP 64
 
 enum vrdma_qp_sm_state_type {
-        VRDMA_QP_STATE_IDLE,
-        VRDMA_QP_STATE_POLL_PI,
-        VRDMA_QP_STATE_HANDLE_PI,
-        VRDMA_QP_STATE_WQE_READ,
-        VRDMA_QP_STATE_WQE_PARSE,
-        VRDMA_QP_STATE_WQE_MAP_BACKEND,
-        VRDMA_QP_STATE_WQE_SUBMIT,
-		VRDMA_QP_STATE_MKEY_WAIT,
-        VRDMA_QP_STATE_POLL_CQ_CI,
-        VRDMA_QP_STATE_GEN_COMP,
-        VRDMA_QP_STATE_FATAL_ERR,
-        VRDMA_QP_NUM_OF_STATES,
+        VRDMA_QP_STATE_IDLE = 0,
+        VRDMA_QP_STATE_POLL_PI = 1,
+        VRDMA_QP_STATE_HANDLE_PI = 2,
+        VRDMA_QP_STATE_WQE_READ = 3,
+        VRDMA_QP_STATE_WQE_PARSE = 4,
+        VRDMA_QP_STATE_WQE_MAP_BACKEND  = 5,
+        VRDMA_QP_STATE_WQE_SUBMIT = 6,
+		VRDMA_QP_STATE_MKEY_WAIT = 7,
+        VRDMA_QP_STATE_POLL_CQ_CI = 8,
+        VRDMA_QP_STATE_GEN_COMP = 9,
+        VRDMA_QP_STATE_FATAL_ERR = 10,
+        VRDMA_QP_NUM_OF_STATES = 11,
 };
 
 struct vrdma_qp_stats {
@@ -299,6 +299,7 @@ struct spdk_vrdma_qp {
 	struct ibv_mr *qp_mr;
 	union vrdma_align_pici *qp_pi;
 	struct vrdma_qp_stats stats;
+	uint16_t local_pi;
 };
 
 struct spdk_vrdma_dev {

@@ -328,6 +328,14 @@ vrdma_dpa_handle_dma_cqe(struct vrdma_dpa_event_handler_ctx *ehctx)
 	}
 }								
 
+static inline uint32_t vrdma_dpa_cpu_cyc_get(void)
+{
+	uint32_t cyc;
+	asm volatile("rdcycle %0" : "=r"(cyc));
+	return cyc;
+}
+
+
 static int
 vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 								struct vrdma_dpa_event_handler_ctx *ehctx,
@@ -337,6 +345,8 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 	uint16_t rq_pi = 0, rq_pi_last = 0;
 	uint16_t sq_pi = 0, sq_pi_last = 0;
 	uint16_t handled_wqe = 0;
+	uint32_t start_cycles, end_cycles;
+	uint32_t avr_cycles;
 
 	vqp_ctx = (struct vrdma_dpa_vqp_ctx *)vqp_daddr;
 	//ehctx = (struct vrdma_dpa_event_handler_ctx *)vqp_ctx->eh_ctx_daddr;
@@ -364,6 +374,8 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 	while ((rq_pi_last != rq_pi) ||
 	 	(sq_pi_last != sq_pi))
 	{
+
+		start_cycles = vrdma_dpa_cpu_cyc_get();
 		if (rq_pi_last != rq_pi) {
 			vrdma_dpa_rq_process(ehctx, vqp_ctx, rq_pi, rq_pi_last);
 			handled_wqe += rq_pi - rq_pi_last;
@@ -392,8 +404,15 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 		sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 	}
 
+	end_cycles = vrdma_dpa_cpu_cyc_get();
+	avr_cycles = (end_cycles - start_cycles) / handled_wqe;
 	flexio_dev_db_ctx_arm(dtctx, ehctx->guest_db_cq_ctx.cqn,
 			      			vqp_ctx->emu_db_to_cq_id);
+#ifdef VRDMA_DPA_DEBUG
+	printf("\n avr_cycle %d, handled_wqe %d, total_cyc %d\n", 
+			avr_cycles, handled_wqe, (end_cycles - start_cycles));
+#endif
+
 #ifdef VRDMA_DPA_DEBUG
 	printf("\n rq_pi %d, sq_pi %d\n", rq_pi, sq_pi);
 	printf("\n dma_qp.hw_qp_sq_pi %d\n", ehctx->dma_qp.hw_qp_sq_pi);
