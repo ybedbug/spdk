@@ -355,7 +355,7 @@ err:
 void
 spdk_jsonrpc_client_inc_ref_cnt(struct spdk_jsonrpc_client *client)
 {
-    client->ref_cnt++;
+    atomic32_inc(&client->ref_cnt);
 }
 
 void
@@ -365,9 +365,7 @@ spdk_jsonrpc_client_close(struct spdk_jsonrpc_client *client)
 	struct spdk_jsonrpc_response *resp, *resp_tmp;
 
     SPDK_NOTICELOG("close client=%p\n", client);
-    if (NULL == client) return;
-    client->ref_cnt--;
-    if (client->ref_cnt) return;
+    if (!atomic32_dec_and_test(&client->ref_cnt)) return;
 	if (client->sockfd >= 0) {
 		close(client->sockfd);
 	}
