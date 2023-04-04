@@ -1730,7 +1730,6 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
 	if (vqp->pre_bk_qp)
 		printf("vqpn 0x%x, pre_bk_qp 0x%x\n", vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum);
-	printf("sq dma_q  0x%x\n", vqp->snap_queue->dma_q->sw_qp.dv_qp.hw_qp.qp_num);
 	printf("sq pi  %-10d       sq pre pi  %-10d\n",
 			vqp->qp_pi->pi.sq_pi, vqp->sq.comm.pre_pi);
 	printf("scq host cqe buff %-20lu     pi %-10d       scq ci %-10d\n",
