@@ -153,10 +153,6 @@ vrdma_find_mqp(struct vrdma_ctrl *ctrl,
         return mqp;
     } else {
         for (i = 0; i < tgid_node->max_mqp_cnt; i++) {
-#ifdef MPATH_DBG
-            SPDK_NOTICELOG("tgid_node->src_udp[%d].mqp=%p",
-                           i, tgid_node->src_udp[i].mqp);
-#endif
             tmp_mqp = tgid_node->src_udp[i].mqp;
             if (!mqp || (tmp_mqp && tmp_mqp->qp_state != IBV_QPS_ERR &&
                          tmp_mqp->vqp_cnt < mqp->vqp_cnt)) {

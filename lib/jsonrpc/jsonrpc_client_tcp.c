@@ -41,7 +41,7 @@ _spdk_jsonrpc_client_send_request(struct spdk_jsonrpc_client *client)
 {
 	ssize_t rc;
 	struct spdk_jsonrpc_client_request *request, *temp;
-
+	pthread_spin_lock(&client->request_lock);
 	STAILQ_FOREACH_SAFE(request, &client->request, stailq, temp) {
 		if (request->send_len > 0) {
 			rc = send(client->sockfd, request->send_buf + request->send_offset,
@@ -54,7 +54,7 @@ _spdk_jsonrpc_client_send_request(struct spdk_jsonrpc_client *client)
 					rc = -errno;
 					SPDK_ERRLOG("poll() failed (%d): %s\n", errno, spdk_strerror(errno));
 				}
-
+				pthread_spin_unlock(&client->request_lock);
 				return rc;
 			}
 
@@ -67,6 +67,7 @@ _spdk_jsonrpc_client_send_request(struct spdk_jsonrpc_client *client)
 			spdk_jsonrpc_client_free_request(request);
 		}*/
 	}
+	pthread_spin_unlock(&client->request_lock);
 
 	return 0;
 }
@@ -76,10 +77,12 @@ spdk_jsonrpc_client_resend_request(struct spdk_jsonrpc_client *client)
 {
 	struct spdk_jsonrpc_client_request *request, *temp;
 
+	pthread_spin_lock(&client->request_lock);
 	STAILQ_FOREACH_SAFE(request, &client->request, stailq, temp) {
 		request->send_len = request->send_total_len;
 		request->send_offset = 0;
 	}
+	pthread_spin_unlock(&client->request_lock);
 }
 
 static int
@@ -107,7 +110,7 @@ recv_buf_expand(struct spdk_jsonrpc_client *client)
 static int
 _spdk_jsonrpc_client_resp_ready_count(struct spdk_jsonrpc_client *client)
 {
-	return client->resp != NULL && client->resp->ready ? 1 : 0;
+	return client->resp_cnt;
 }
 
 static int
@@ -131,6 +134,7 @@ _spdk_jsonrpc_client_recv(struct spdk_jsonrpc_client *client)
 		}
 	}
 
+    SPDK_NOTICELOG("recv_buf=%p, recv_offset=%lu\n", client->recv_buf, client->recv_offset);
 	rc = recv(client->sockfd, client->recv_buf + client->recv_offset,
 		  client->recv_buf_size - client->recv_offset - 1, 0);
 	if (rc < 0) {
@@ -335,7 +339,8 @@ spdk_jsonrpc_client_connect(const char *addr, int addr_family)
 		freeaddrinfo(res);
 	}
 	STAILQ_INIT(&client->request);
-
+	STAILQ_INIT(&client->resp_queue);
+	pthread_spin_init(&client->request_lock, PTHREAD_PROCESS_PRIVATE);
 err:
 	if (rc != 0 && rc != -EINPROGRESS) {
 		free(client);
@@ -348,21 +353,36 @@ err:
 }
 
 void
+spdk_jsonrpc_client_inc_ref_cnt(struct spdk_jsonrpc_client *client)
+{
+    client->ref_cnt++;
+}
+
+void
 spdk_jsonrpc_client_close(struct spdk_jsonrpc_client *client)
 {
 	struct spdk_jsonrpc_client_request *req, *temp;
+	struct spdk_jsonrpc_response *resp, *resp_tmp;
 
+    SPDK_NOTICELOG("close client=%p\n", client);
+    if (NULL == client) return;
+    client->ref_cnt--;
+    if (client->ref_cnt) return;
 	if (client->sockfd >= 0) {
 		close(client->sockfd);
 	}
 
-	free(client->recv_buf);
-	if (client->resp) {
-		spdk_jsonrpc_client_free_response(&client->resp->jsonrpc);
-	}
+    if (client->recv_buf)
+	    free(client->recv_buf);
+	pthread_spin_lock(&client->request_lock);
 	STAILQ_FOREACH_SAFE(req, &client->request, stailq, temp) {
 		STAILQ_REMOVE(&client->request, req, spdk_jsonrpc_client_request, stailq);
 		spdk_jsonrpc_client_free_request(req);
+	}
+	pthread_spin_unlock(&client->request_lock);
+	STAILQ_FOREACH_SAFE(resp, &client->resp_queue, link, resp_tmp) {
+		STAILQ_REMOVE(&client->resp_queue, resp, spdk_jsonrpc_response, link);
+		spdk_jsonrpc_client_free_response(&resp->jsonrpc);
 	}
 	free(client);
 }
@@ -402,6 +422,7 @@ spdk_jsonrpc_client_remove_request_from_list(struct spdk_jsonrpc_client *client,
 {
 	struct spdk_jsonrpc_client_request *req, *temp;
 
+	pthread_spin_lock(&client->request_lock);
 	STAILQ_FOREACH_SAFE(req, &client->request, stailq, temp) {
 		if (req->request_id == request_id) {
 			STAILQ_REMOVE(&client->request, req, spdk_jsonrpc_client_request, stailq);
@@ -409,6 +430,7 @@ spdk_jsonrpc_client_remove_request_from_list(struct spdk_jsonrpc_client *client,
 			break;
 		}
 	}
+	pthread_spin_unlock(&client->request_lock);
 }
 
 bool
@@ -430,7 +452,9 @@ spdk_jsonrpc_client_poll(struct spdk_jsonrpc_client *client, int timeout)
 int spdk_jsonrpc_client_send_request(struct spdk_jsonrpc_client *client,
 				     struct spdk_jsonrpc_client_request *req)
 {
+	pthread_spin_lock(&client->request_lock);
 	STAILQ_INSERT_TAIL(&client->request, req, stailq);
+	pthread_spin_unlock(&client->request_lock);
 	return 0;
 }
 
@@ -443,27 +467,32 @@ void spdk_jsonrpc_set_request_id(struct spdk_jsonrpc_client_request *req,
 struct spdk_jsonrpc_client_response *
 spdk_jsonrpc_client_get_response(struct spdk_jsonrpc_client *client)
 {
-	struct spdk_jsonrpc_client_response_internal *r;
+    struct spdk_jsonrpc_response *r;
 
-	r = client->resp;
-	if (r == NULL || r->ready == false) {
-		return NULL;
-	}
-
-	client->resp = NULL;
-	return &r->jsonrpc;
+    if (!client) return NULL;
+    pthread_spin_lock(&client->request_lock);
+    r = STAILQ_FIRST(&client->resp_queue);
+    if (r == NULL || r->ready == false) {
+        pthread_spin_unlock(&client->request_lock);
+        return NULL;
+    }
+    STAILQ_REMOVE_HEAD(&client->resp_queue, link);
+    client->resp_cnt--;
+    pthread_spin_unlock(&client->request_lock);
+    return &r->jsonrpc;
 }
 
 void
 spdk_jsonrpc_client_free_response(struct spdk_jsonrpc_client_response *resp)
 {
-	struct spdk_jsonrpc_client_response_internal *r;
+	struct spdk_jsonrpc_response *r;
 
 	if (!resp) {
 		return;
 	}
 
-	r = SPDK_CONTAINEROF(resp, struct spdk_jsonrpc_client_response_internal, jsonrpc);
-	free(r->buf);
+	r = SPDK_CONTAINEROF(resp, struct spdk_jsonrpc_response, jsonrpc);
+	if (r->buf)
+	    free(r->buf);
 	free(r);
 }

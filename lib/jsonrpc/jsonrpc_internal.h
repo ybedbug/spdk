@@ -117,7 +117,8 @@ struct spdk_jsonrpc_client_request {
 	STAILQ_ENTRY(spdk_jsonrpc_client_request) stailq;
 };
 
-struct spdk_jsonrpc_client_response_internal {
+struct spdk_jsonrpc_response {
+    STAILQ_ENTRY(spdk_jsonrpc_response) link;
 	struct spdk_jsonrpc_client_response jsonrpc;
 	bool ready;
 	uint8_t *buf;
@@ -132,9 +133,11 @@ struct spdk_jsonrpc_client {
 	size_t recv_buf_size;
 	size_t recv_offset;
 	char *recv_buf;
-
-	/* Parsed response */
-	struct spdk_jsonrpc_client_response_internal *resp;
+    uint32_t ref_cnt;
+    uint32_t resp_cnt;
+    /* Parsed response */
+    STAILQ_HEAD(, spdk_jsonrpc_response) resp_queue;
+	pthread_spinlock_t request_lock;
 	STAILQ_HEAD(, spdk_jsonrpc_client_request) request;
 };
 

@@ -56,6 +56,7 @@ struct vrdma_indirect_mkey_list_head vrdma_indirect_mkey_list =
 
 struct vrdma_r_vkey_list_head vrdma_r_vkey_list =
 				LIST_HEAD_INITIALIZER(vrdma_r_vkey_list);
+pthread_spinlock_t vrdma_r_vkey_list_lock;
 
 void spdk_vrdma_disable_indirect_mkey_map(void)
 {
@@ -317,6 +318,11 @@ void vrdma_reg_mr_create_attr(struct vrdma_create_mr_req *mr_req,
 	/*TODO use mr_type and access_flag in future. Not support in POC.*/
 }
 
+void spdk_vrdma_init_vkey_lock(void)
+{
+    pthread_spin_init(&vrdma_r_vkey_list_lock, PTHREAD_PROCESS_PRIVATE);
+}
+
 void spdk_vrdma_set_vkey_tv(void)
 {
 	clock_gettime(CLOCK_REALTIME, &g_last_vkey_tv);
@@ -344,9 +350,11 @@ void vrdma_del_r_vkey_list(void)
 {
 	struct vrdma_r_vkey *r_vkey, *vkey_tmp;
 
+	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		vrdma_del_r_vkey_tbl_from_list(r_vkey);
 	}
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 }
 
 void vrdma_add_r_vkey_list(uint64_t gid_ip, uint32_t vkey_idx,
@@ -356,27 +364,19 @@ void vrdma_add_r_vkey_list(uint64_t gid_ip, uint32_t vkey_idx,
 
 	if (vkey_idx >= VRDMA_DEV_MAX_MR)
 		return;
+	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		if (r_vkey->vkey_tbl.gid_ip == gid_ip) {
 			r_vkey->vkey_tbl.vkey[vkey_idx].mkey = vkey->mkey;
+			r_vkey->vkey_tbl.vkey[vkey_idx].state = MKEY_VALID;
 			spdk_vrdma_vkey_set_ts(&r_vkey->vkey_tbl.vkey[vkey_idx].ts);
 			SPDK_NOTICELOG("Add vkey entry gid_ip 0x%lx vkey 0x%x mkey 0x%x ts 0x%lx\n",
 					gid_ip, vkey_idx, vkey->mkey, r_vkey->vkey_tbl.vkey[vkey_idx].ts);
+            pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 			return;
 		}
 	}
-    r_vkey = calloc(1, sizeof(*r_vkey));
-    if (!r_vkey) {
-		SPDK_ERRLOG("Failed to allocate remote vkey memory for vkey_idx 0x%x",
-			vkey_idx);
-		return;
-	}
-	r_vkey->vkey_tbl.gid_ip = gid_ip;
-	r_vkey->vkey_tbl.vkey[vkey_idx].mkey = vkey->mkey;
-	spdk_vrdma_vkey_set_ts(&r_vkey->vkey_tbl.vkey[vkey_idx].ts);
-	LIST_INSERT_HEAD(&vrdma_r_vkey_list, r_vkey, entry);
-	SPDK_NOTICELOG("Add vkey entry gid_ip 0x%lx vkey 0x%x mkey 0x%x ts 0x%lx\n",
-			gid_ip, vkey_idx, vkey->mkey, r_vkey->vkey_tbl.vkey[vkey_idx].ts);
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 }
 
 void spdk_vrdma_vkey_age_progress(void)
@@ -391,6 +391,7 @@ void spdk_vrdma_vkey_age_progress(void)
 		return;
 
 	clock_gettime(CLOCK_REALTIME, &g_last_vkey_tv);
+	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		count = 0;
 		for (i = 0; i < VRDMA_DEV_MAX_MR; i++) {
@@ -417,6 +418,7 @@ void spdk_vrdma_vkey_age_progress(void)
 			vrdma_del_r_vkey_tbl_from_list(r_vkey);
 		}
 	}
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 }
 
 static int vrdma_query_remote_mkey_by_rpc(uint64_t gid_ip,
@@ -446,21 +448,46 @@ vrdma_find_r_mkey(struct spdk_vrdma_qp *vqp, uint32_t vkey_idx,
 
 	if (vkey_idx >= VRDMA_DEV_MAX_MR)
 		return 0;
+	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		if (r_vkey->vkey_tbl.gid_ip == vqp->remote_gid_ip) {
 			if (r_vkey->vkey_tbl.vkey[vkey_idx].mkey) {
 				r_vkey->vkey_tbl.vkey[vkey_idx].ts = 0;
 				vqp->last_r_mkey_ts = &r_vkey->vkey_tbl.vkey[vkey_idx].ts;
+                pthread_spin_unlock(&vrdma_r_vkey_list_lock);
 				return r_vkey->vkey_tbl.vkey[vkey_idx].mkey;
 			}
 			break;
 		}
 	}
-	/* Send rpc to get remote mkey */
-	if (vrdma_query_remote_mkey_by_rpc(vqp->remote_gid_ip,
-				vqp->dest_qp_num, vkey_idx))
-		return 0;
-	/* Waiting for rpc resp */
-	*wait_mkey = true;
-	return 0;
+    if (!r_vkey) {
+        r_vkey = calloc(1, sizeof(*r_vkey));
+        if (!r_vkey) {
+            SPDK_ERRLOG("Failed to allocate remote vkey memory for vkey_idx 0x%x",
+                        vkey_idx);
+            pthread_spin_unlock(&vrdma_r_vkey_list_lock);
+            return 0;
+        }
+        r_vkey->vkey_tbl.gid_ip = vqp->remote_gid_ip;
+        LIST_INSERT_HEAD(&vrdma_r_vkey_list, r_vkey, entry);
+        SPDK_NOTICELOG("Add vkey entry gid_ip 0x%lx vkey 0x%x\n",
+                       vqp->remote_gid_ip, vkey_idx);
+	}
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
+    if (r_vkey->vkey_tbl.vkey[vkey_idx].state == MKEY_PENDING) {
+        /* this entry is waiting response, don't send query again */
+        *wait_mkey = true;
+        return 0;
+    } else {
+        /* Send rpc to get remote mkey */
+        if (vrdma_query_remote_mkey_by_rpc(vqp->remote_gid_ip,
+                                           vqp->dest_qp_num, vkey_idx)) {
+            *wait_mkey = true;
+            return 0;
+        }
+        r_vkey->vkey_tbl.vkey[vkey_idx].state = MKEY_PENDING;
+        /* Waiting for rpc resp */
+        *wait_mkey = true;
+        return 0;
+    }
 }
