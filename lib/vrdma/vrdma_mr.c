@@ -472,21 +472,20 @@ vrdma_find_r_mkey(struct spdk_vrdma_qp *vqp, uint32_t vkey_idx,
         LIST_INSERT_HEAD(&vrdma_r_vkey_list, r_vkey, entry);
         SPDK_NOTICELOG("Add vkey entry gid_ip 0x%lx vkey 0x%x\n",
                        vqp->remote_gid_ip, vkey_idx);
-	}
-	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
-    if (r_vkey->vkey_tbl.vkey[vkey_idx].state == MKEY_PENDING) {
-        /* this entry is waiting response, don't send query again */
-        *wait_mkey = true;
-        return 0;
-    } else {
         /* Send rpc to get remote mkey */
         if (vrdma_query_remote_mkey_by_rpc(vqp->remote_gid_ip,
                                            vqp->dest_qp_num, vkey_idx)) {
             *wait_mkey = true;
+            pthread_spin_unlock(&vrdma_r_vkey_list_lock);
             return 0;
         }
         r_vkey->vkey_tbl.vkey[vkey_idx].state = MKEY_PENDING;
         /* Waiting for rpc resp */
+        *wait_mkey = true;
+	}
+	pthread_spin_unlock(&vrdma_r_vkey_list_lock);
+    if (r_vkey->vkey_tbl.vkey[vkey_idx].state == MKEY_PENDING) {
+        /* this entry is waiting response, don't send query again */
         *wait_mkey = true;
         return 0;
     }

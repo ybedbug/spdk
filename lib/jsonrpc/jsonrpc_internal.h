@@ -38,8 +38,6 @@
 #include "spdk/util.h"
 #include "spdk/jsonrpc.h"
 #include "spdk_internal/log.h"
-#include <libutil/atomic.h>
-
 
 #define SPDK_JSONRPC_RECV_BUF_SIZE	(32 * 1024)
 #define SPDK_JSONRPC_SEND_BUF_SIZE_INIT	(32 * 1024)
@@ -135,7 +133,6 @@ struct spdk_jsonrpc_client {
 	size_t recv_buf_size;
 	size_t recv_offset;
 	char *recv_buf;
-    atomic32_t ref_cnt;
     uint32_t resp_cnt;
     /* Parsed response */
     STAILQ_HEAD(, spdk_jsonrpc_response) resp_queue;
