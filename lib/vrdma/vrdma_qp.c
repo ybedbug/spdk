@@ -473,9 +473,7 @@ bool vrdma_set_vq_flush(struct vrdma_ctrl *ctrl,
                 sq_meta->vqp = NULL;
         }
     }
-	if (ctrl->sctrl->q_ops->is_suspended(vqp->snap_queue))
-		return false;
-	ctrl->sctrl->q_ops->suspend(vqp->snap_queue);
+	vqp->sw_state = VRDMA_QP_SW_STATE_FLUSHING;
 	return true;
 }
 
@@ -511,7 +509,7 @@ bool vrdma_qp_is_suspended(struct vrdma_ctrl *ctrl, uint32_t qp_handle)
 			qp_handle);
 		return false;
 	}
-	return ctrl->sctrl->q_ops->is_suspended(vqp->snap_queue);
+	return vqp->sw_state == VRDMA_QP_SW_STATE_SUSPENDED;
 }
 
 bool vrdma_qp_is_connected_ready(struct spdk_vrdma_qp *vqp)
@@ -622,12 +620,11 @@ static int vrdma_sched_vq_nolock(struct snap_vrdma_ctrl *ctrl,
 }
 
 void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
-				     struct spdk_vrdma_qp *vq)
+				     struct spdk_vrdma_qp *vq,
+				     struct snap_pg *pg)
 {
-	struct snap_pg *pg;
 	struct vrdma_ctrl *v_ctrl = ctrl->cb_ctx;
 
-	pg = snap_pg_get_next(&ctrl->pg_ctx);
 	vq->snap_queue = vrdma_ctrl_find_dma_qp(v_ctrl, vq, pg->id);
 	if (!vq->snap_queue) {
 		SPDK_ERRLOG("VRDMA queue %d failed to join scheduler\n", vq->qp_idx);
@@ -635,7 +632,8 @@ void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 	}
 	pthread_spin_lock(&pg->lock);
 	vrdma_sched_vq_nolock(ctrl, vq, pg);
-	SPDK_NOTICELOG("VRDMA queue sched polling group id = %d\n", vq->pg->id);
+	SPDK_NOTICELOG("VRDMA queue id %d sched polling group id = %d\n",
+					vq->qp_idx, vq->pg->id);
 	pthread_spin_unlock(&pg->lock);
 }
 
@@ -658,7 +656,8 @@ void vrdma_desched_vq(struct spdk_vrdma_qp *vq)
 	if (!pg)
 		return;
 
-	SPDK_NOTICELOG("VRDMA queue desched polling group id = %d\n", vq->pg->id);
+	SPDK_NOTICELOG("VRDMA queue id %d desched polling group id = %d\n",
+					vq->qp_idx, vq->pg->id);
 	pthread_spin_lock(&pg->lock);
 	vrdma_desched_vq_nolock(vq);
 	pthread_spin_unlock(&pg->lock);
