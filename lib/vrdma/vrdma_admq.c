@@ -927,13 +927,11 @@ static int vrdma_aq_destroy_qp(struct vrdma_ctrl *ctrl,
 					aqe->resp.destroy_qp_resp.err_code);
 		return 0;
 	}
-#if 0
 	if (vrdma_qp_is_connected_ready(vqp)) {
 		if (vrdma_set_vq_flush(ctrl, vqp)) {
 			return VRDMA_CMD_STATE_WAITING;
 		}
 	}
-#endif
 	vrdma_aq_destroy_suspended_qp(ctrl, aqe, vqp);
 	return 0;
 }

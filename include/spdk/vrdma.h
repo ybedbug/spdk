@@ -191,6 +191,12 @@ enum vrdma_qp_sm_state_type {
         VRDMA_QP_NUM_OF_STATES = 11,
 };
 
+enum vrdma_qp_sw_state {
+		VRDMA_QP_SW_STATE_RUNNING = 0,
+		VRDMA_QP_SW_STATE_FLUSHING = 1,
+		VRDMA_QP_SW_STATE_SUSPENDED = 2,
+};
+
 struct vrdma_qp_stats {
 	uint64_t sq_dma_tx_cnt;
 	uint64_t sq_dma_rx_cnt;
@@ -300,6 +306,7 @@ struct spdk_vrdma_qp {
 	union vrdma_align_pici *qp_pi;
 	struct vrdma_qp_stats stats;
 	uint16_t local_pi;
+	uint16_t sw_state;
 };
 
 struct spdk_vrdma_dev {
