@@ -308,7 +308,7 @@ void vrdma_reg_mr_create_attr(struct vrdma_create_mr_req *mr_req,
 {
 	struct spdk_vrdma_mr_log *lattr = &vmr->mr_log;
 	uint32_t i;
- 
+
 	lattr->start_vaddr = mr_req->vaddr;
 	lattr->num_sge = mr_req->sge_count;
 	for (i = 0; i < lattr->num_sge; i++) {
@@ -381,7 +381,7 @@ void vrdma_add_r_vkey_list(uint64_t gid_ip, uint32_t vkey_idx,
 
 void spdk_vrdma_vkey_age_progress(void)
 {
-	
+
 	struct vrdma_r_vkey *r_vkey, *vkey_tmp;
 	struct timespec vkey_tv;
 	uint32_t i, count;
@@ -472,6 +472,8 @@ vrdma_find_r_mkey(struct spdk_vrdma_qp *vqp, uint32_t vkey_idx,
         LIST_INSERT_HEAD(&vrdma_r_vkey_list, r_vkey, entry);
         SPDK_NOTICELOG("Add vkey entry gid_ip 0x%lx vkey 0x%x\n",
                        vqp->remote_gid_ip, vkey_idx);
+   }
+   if (!r_vkey->vkey_tbl.vkey[vkey_idx].state) {
         /* Send rpc to get remote mkey */
         if (vrdma_query_remote_mkey_by_rpc(vqp->remote_gid_ip,
                                            vqp->dest_qp_num, vkey_idx)) {
