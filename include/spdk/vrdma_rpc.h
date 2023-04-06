@@ -103,6 +103,7 @@ struct spdk_vrdma_rpc {
     struct spdk_vrdma_rpc_server srv;
 	struct spdk_vrdma_rpc_client client;
 };
+extern pthread_spinlock_t vrdma_rpc_lock;
 extern struct spdk_vrdma_rpc g_vrdma_rpc;
 extern uint64_t g_node_ip;
 extern uint64_t g_node_rip;

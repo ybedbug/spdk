@@ -69,6 +69,7 @@ static char *g_vrdma_qp_method_str = "VRDMA_RPC_SRV_QP";
 static char *g_vrdma_mkey_method_str = "VRDMA_RPC_MKEY";
 static SLIST_HEAD(, spdk_vrdma_rpc_method) g_vrdma_rpc_methods = SLIST_HEAD_INITIALIZER(g_vrdma_rpc_methods);
 struct spdk_vrdma_rpc g_vrdma_rpc;
+pthread_spinlock_t vrdma_rpc_lock;
 uint64_t g_node_ip = 0;
 uint64_t g_node_rip = 0;
 static uint32_t g_request_id = 0;
@@ -98,6 +99,7 @@ spdk_vrdma_rpc_client_check_timeout(struct spdk_vrdma_rpc_client *client)
 static void
 spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
 {
+    pthread_spin_lock(&vrdma_rpc_lock);
     if (client->client_conn_poller) {
 	    spdk_poller_unregister(&client->client_conn_poller);
         client->client_conn_poller = NULL;
@@ -106,6 +108,7 @@ spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
         spdk_jsonrpc_client_close(client->client_conn);
         client->client_conn = NULL;
     }
+    pthread_spin_unlock(&vrdma_rpc_lock);
 }
 
 static int
@@ -392,28 +395,11 @@ close_rpc:
 }
 
 static int
-spdk_vrdma_client_send_request(struct spdk_vrdma_rpc_client *client,
-		struct spdk_jsonrpc_client_request *request)
-{
-	int rc;
-
-	client->client_resp_cb = spdk_vrdma_client_resp_handler;
-	spdk_vrdma_rpc_client_set_timeout(client,
-            VRDMA_RPC_CLIENT_REQUEST_TIMEOUT_US);
-	rc = spdk_jsonrpc_client_send_request(client->client_conn, request);
-	if (rc)
-		SPDK_ERRLOG("Sending request to client failed (%d)\n", rc);
-	return rc;
-}
-
-static int
 spdk_vrdma_rpc_client_configuration(const char *addr)
 {
     struct spdk_vrdma_rpc_client *client = &g_vrdma_rpc.client;
-
     if (client->client_conn) {
 		SPDK_NOTICELOG("RPC client connect to '%s' is already existed.\n", addr);
-        spdk_jsonrpc_client_inc_ref_cnt(client->client_conn);
 		return 0;
 	}
     client->client_conn = spdk_jsonrpc_client_connect(addr, AF_UNSPEC);
@@ -426,6 +412,28 @@ spdk_vrdma_rpc_client_configuration(const char *addr)
 	client->client_conn_poller = spdk_poller_register(
 			spdk_vrdma_client_connect_poller, client, 100);
     return 0;
+}
+
+static int
+spdk_vrdma_client_send_request(struct spdk_vrdma_rpc_client *client,
+		struct spdk_jsonrpc_client_request *request)
+{
+	int rc;
+    pthread_spin_lock(&vrdma_rpc_lock);
+    if (spdk_vrdma_rpc_client_configuration(g_vrdma_rpc.node_rip)) {
+        SPDK_ERRLOG("Failed to client configuration");
+        pthread_spin_unlock(&vrdma_rpc_lock);
+        return -1;
+    }
+
+	client->client_resp_cb = spdk_vrdma_client_resp_handler;
+	spdk_vrdma_rpc_client_set_timeout(client,
+            VRDMA_RPC_CLIENT_REQUEST_TIMEOUT_US);
+	rc = spdk_jsonrpc_client_send_request(client->client_conn, request);
+	if (rc)
+		SPDK_ERRLOG("Sending request to client failed (%d)\n", rc);
+    pthread_spin_unlock(&vrdma_rpc_lock);
+	return rc;
 }
 
 static void
@@ -503,10 +511,6 @@ out:
 int spdk_vrdma_rpc_send_qp_msg(const char *addr,
                 struct spdk_vrdma_rpc_qp_msg *msg)
 {
-    if (spdk_vrdma_rpc_client_configuration(addr)) {
-        SPDK_ERRLOG("%s: Failed to client configuration\n", __func__);
-        return -1;
-    }
     if (spdk_vrdma_rpc_client_send_qp_msg(msg)) {
         SPDK_ERRLOG("Failed to send request");
         return -1;
@@ -863,11 +867,6 @@ out:
 int spdk_vrdma_rpc_send_mkey_msg(const char *addr,
                 struct spdk_vrdma_rpc_mkey_msg *msg)
 {
-    if (spdk_vrdma_rpc_client_configuration(addr)) {
-        SPDK_ERRLOG("Failed to client configuration for vkey %d\n",
-            msg->mkey_attr.vkey);
-        return -1;
-    }
     if (spdk_vrdma_rpc_client_send_mkey_msg(msg)) {
         SPDK_ERRLOG("Failed to send request for vkey %d\n",
             msg->mkey_attr.vkey);

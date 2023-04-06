@@ -90,6 +90,8 @@ int spdk_vrdma_ctx_start(struct spdk_vrdma_ctx *vrdma_ctx)
 		goto err;
 	}
 	ibv_free_device_list(list);
+    pthread_spin_init(&vrdma_rpc_lock, PTHREAD_PROCESS_PRIVATE);	
+    spdk_vrdma_init_vkey_lock();
 	/*Create static PF device*/
 	for (dev_count = 0; (uint32_t)dev_count < sctx->vrdma_pfs.num_emulated_pfs;
 		dev_count++) {
@@ -112,7 +114,6 @@ int spdk_vrdma_ctx_start(struct spdk_vrdma_ctx *vrdma_ctx)
 		ctrl = ctx->ctrl;
 		ctrl->emu_ctx  = spdk_vrdma_snap_get_ibv_context(vrdma_ctx->emu_manager);
 		//vrdma_ctx->dpa_enabled = 1;
-		spdk_vrdma_init_vkey_lock();
 		spdk_vrdma_set_vkey_tv();
 #if defined (CX7) || defined (BF3)
 		ctrl->dpa_enabled = 1;

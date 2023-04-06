@@ -265,9 +265,6 @@ void spdk_jsonrpc_end_request(struct spdk_jsonrpc_client_request *request,
  */
 struct spdk_jsonrpc_client *spdk_jsonrpc_client_connect(const char *addr, int addr_family);
 
-void
-spdk_jsonrpc_client_inc_ref_cnt(struct spdk_jsonrpc_client *client);
-
 /**
  * Close JSON-RPC connection and free \c client object.
  *
