@@ -1073,6 +1073,7 @@ static void vrdma_aq_modify_qp(struct vrdma_ctrl *ctrl,
 		SPDK_ERRLOG("Failed to notify modify QP %d in service, err(%d)\n",
 					aqe->req.modify_qp_req.qp_handle,
 					aqe->resp.modify_qp_resp.err_code);
+		vqp->qp_state = IBV_QPS_ERR;
 		return;
 	}
 }

@@ -619,7 +619,7 @@ static int vrdma_sched_vq_nolock(struct snap_vrdma_ctrl *ctrl,
 	return 0;
 }
 
-void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
+int vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 				     struct spdk_vrdma_qp *vq,
 				     struct snap_pg *pg)
 {
@@ -628,13 +628,14 @@ void vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 	vq->snap_queue = vrdma_ctrl_find_dma_qp(v_ctrl, vq, pg->id);
 	if (!vq->snap_queue) {
 		SPDK_ERRLOG("VRDMA queue %d failed to join scheduler\n", vq->qp_idx);
-		return;
+		return -1;
 	}
 	pthread_spin_lock(&pg->lock);
 	vrdma_sched_vq_nolock(ctrl, vq, pg);
 	SPDK_NOTICELOG("VRDMA queue id %d sched polling group id = %d\n",
 					vq->qp_idx, vq->pg->id);
 	pthread_spin_unlock(&pg->lock);
+	return 0;
 }
 
 static void vrdma_desched_vq_nolock(struct spdk_vrdma_qp *vq)
