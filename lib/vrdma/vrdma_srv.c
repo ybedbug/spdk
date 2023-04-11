@@ -262,7 +262,10 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
                        vqp->pre_bk_qp->poller_core);
     }
     /* init2rtr vqp join poller-group */
-	vrdma_sched_vq(ctrl->sctrl, vqp, pg);
+	if (vrdma_sched_vq(ctrl->sctrl, vqp, pg)) {
+		SPDK_ERRLOG("vqp=%u failed to join poller group \n", vqp->qp_idx);
+		return -1;
+	}
 	return 0;
 }
 
