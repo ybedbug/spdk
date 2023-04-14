@@ -252,15 +252,15 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
     }
     if (vqp->pre_bk_qp->poller_core == VRDMA_INVALID_POLLER_CORE) {
         pg = snap_pg_get_next(&ctrl->sctrl->pg_ctx);
-        vqp->pre_bk_qp->poller_core = pg->id;
+        vqp->pre_bk_qp->poller_core = mqp_idx;
         SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
                        vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, pg->id);
     } else {
-        pg = &ctrl->sctrl->pg_ctx.pgs[vqp->pre_bk_qp->poller_core];
         SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
                        vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
                        vqp->pre_bk_qp->poller_core);
     }
+    pg = &ctrl->sctrl->pg_ctx.pgs[vqp->pre_bk_qp->poller_core];
     /* init2rtr vqp join poller-group */
 	if (vrdma_sched_vq(ctrl->sctrl, vqp, pg)) {
 		SPDK_ERRLOG("vqp=%u failed to join poller group \n", vqp->qp_idx);
