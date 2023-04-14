@@ -1074,7 +1074,7 @@ struct spdk_vrdma_rpc_controller_configue_attr {
     char *node_ip;
     char *node_rip;
 	int32_t show_vqpn;
-	uint16_t dpa_thread_id;
+	int32_t dpa_thread_id;
     int backend_mtu;
 };
 
@@ -1183,7 +1183,7 @@ spdk_vrdma_rpc_controller_configue_decoder[] = {
     {
         "show_dpa_thread",
         offsetof(struct spdk_vrdma_rpc_controller_configue_attr, dpa_thread_id),
-        spdk_json_decode_uint16,
+        spdk_json_decode_int32,
         true
     },
     {
