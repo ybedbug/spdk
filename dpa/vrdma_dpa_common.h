@@ -38,7 +38,7 @@
 
 #define VQP_PER_THREAD 8
 #define MAX_DPA_THREAD 8
-#define VRDMA_VQP_HANDLE_BUDGET 1024
+#define VRDMA_VQP_HANDLE_BUDGET 1024 
 #define VRDMA_TOTAL_WQE_BUDGET (VRDMA_VQP_HANDLE_BUDGET * VQP_PER_THREAD)
 #define VRDMA_CONT_NULL_CQE_BUDGET 6
 #define VRDMA_CQ_WAIT_THRESHOLD(cq_len)  (cq_len >> 2)
@@ -238,4 +238,11 @@ vrdma_debug_value_set(struct vrdma_dpa_event_handler_ctx *ehctx, uint32_t cnt_id
 {
 	ehctx->debug_data.value[cnt_idx] = value;
 }
+
+static inline void
+vrdma_debug_value_add(struct vrdma_dpa_event_handler_ctx *ehctx, uint32_t cnt_idx, uint32_t value)
+{
+	ehctx->debug_data.value[cnt_idx] += value;
+}
+
 #endif

@@ -1796,12 +1796,48 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 			vqp->dpa_vqp.dpa_thread->dpa_dma_qp->qp_num,
 		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_sqcq.cq_num,
 		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_rqcq.cq_num);
-		vrdma_prov_vq_query(vqp->dpa_vqp.dpa_thread);
 	} else {
 		printf("\nsnap_queue is %s, dpa_vq is %s, dma_q is %s\n",
 			vqp->snap_queue ? "not_null" : "null",
 			vqp->dpa_vqp.dpa_thread->dpa_dma_qp ? "not_null" : "null",
 			vqp->snap_queue->dma_q ? "not_null" : "null");
+	}
+}
+
+void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
+{
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+
+	if (dpa_thread_id >= MAX_DPA_THREAD) {
+		printf("invalid thread id %d\n", dpa_thread_id);
+		return;
+	}
+	
+	dpa_thread = &g_dpa_threads[dpa_thread_id];
+	if (!dpa_thread) {
+		printf("dpa thread is null\n");
+		return;
+	}
+	
+	printf("\n========= dpa thread debug info =========\n");
+	if (dpa_thread->sw_dma_qp && dpa_thread->sw_dma_qp->dma_q &&
+		dpa_thread->dpa_handler && dpa_thread->dpa_dma_qp) {
+		printf("hw_dbcq %#x, dpa thread idx %d, attached vqp num %d\n"
+			"sw_qp : %#x sqcq %#x rqcq %#x,\ndpa qp: %#x sqcq %#x rqcq %#x\n",
+			dpa_thread->dpa_handler->db_cq.cq_num, dpa_thread->thread_idx,
+			dpa_thread->attached_vqp_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_qp.hw_qp.qp_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_tx_cq.cq_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_rx_cq.cq_num,
+			dpa_thread->dpa_dma_qp->qp_num,
+		 	dpa_thread->dpa_dma_qp->dma_q_sqcq.cq_num,
+		 	dpa_thread->dpa_dma_qp->dma_q_rqcq.cq_num);
+		vrdma_prov_vq_query(dpa_thread);
+	} else {
+		printf("\nsnap_queue is %s, dpa_handler is %s, dpa_dma_qp is %s\n",
+			dpa_thread->sw_dma_qp ? "not_null" : "null",
+			dpa_thread->dpa_handler ? "not_null" : "null",
+			dpa_thread->dpa_dma_qp ? "not_null" : "null");
 	}
 }
 

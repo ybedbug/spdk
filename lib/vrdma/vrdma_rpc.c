@@ -1074,6 +1074,7 @@ struct spdk_vrdma_rpc_controller_configue_attr {
     char *node_ip;
     char *node_rip;
 	int32_t show_vqpn;
+	uint16_t dpa_thread_id;
     int backend_mtu;
 };
 
@@ -1177,6 +1178,12 @@ spdk_vrdma_rpc_controller_configue_decoder[] = {
         "show_vqpn",
         offsetof(struct spdk_vrdma_rpc_controller_configue_attr, show_vqpn),
         spdk_json_decode_uint32,
+        true
+    },
+    {
+        "show_dpa_thread",
+        offsetof(struct spdk_vrdma_rpc_controller_configue_attr, dpa_thread_id),
+        spdk_json_decode_uint16,
         true
     },
     {
@@ -1310,6 +1317,7 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
     attr->backend_rqpn = -1;
 	attr->src_addr_idx = -1;;
 	attr->show_vqpn = -1;
+	attr->dpa_thread_id = -1;
     attr->backend_mtu = -1;
 
     if (spdk_json_decode_object(params,
@@ -1561,6 +1569,9 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
         }
 		vrdma_dump_vqp_stats(ctrl, vqp);
         send_vqp_result = true;
+    }
+	if (attr->dpa_thread_id != -1) {
+		vrdma_dump_dpa_thread_stats(attr->dpa_thread_id);
     }
     w = spdk_jsonrpc_begin_result(request);
     if (send_vqp_result)
