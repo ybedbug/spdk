@@ -385,6 +385,7 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 			handled_wqe += sq_pi - sq_pi_last;
 		}
 
+		vrdma_debug_count_set(ehctx, 6);
 		flexio_dev_dbr_sq_set_pi((uint32_t *)ehctx->dma_qp.dbr_daddr + 1,
 								ehctx->dma_qp.hw_qp_sq_pi);
 		flexio_dev_qp_sq_ring_db(dtctx, ehctx->dma_qp.hw_qp_sq_pi,
@@ -420,7 +421,6 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 		ehctx->guest_db_cq_ctx.cqn, vqp_ctx->emu_db_to_cq_id, ehctx->guest_db_cq_ctx.ci);
 #endif
 out:
-	vrdma_debug_value_set(ehctx, 7, sq_pi);
 	vqp_ctx->rq_last_fetch_start = rq_pi;
 	vqp_ctx->sq_last_fetch_start = sq_pi;
 
@@ -470,6 +470,9 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 	uint16_t null_db_cqe_cnt = 0;
 	struct vrdma_dev_cqe64 *db_cqe;
 	uint32_t emu_db_handle;
+	uint16_t vqp_idx;
+	flexio_uintptr_t vqp_daddr;
+	uint8_t need_to_release = 0;
 
 	flexio_dev_get_thread_ctx(&dtctx);
 	ehctx = (struct vrdma_dpa_event_handler_ctx *)thread_arg;
@@ -498,7 +501,8 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 			emu_db_handle = be32_to_cpu(db_cqe->emu_db_handle);
 			vqp_ctx = (struct vrdma_dpa_vqp_ctx *)vrdma_dpa_get_vqp_ctx(ehctx, emu_db_handle);
 #ifdef VRDMA_DPA_DEBUG
-			printf("%s: virtq emu db handler %d, vqp_idx %d.\n", __func__, emu_db_handle, vqp_ctx->vq_index);
+			printf("%s: virtq emu db handler %d, vqp_idx %d.\n",
+					__func__, emu_db_handle, vqp_ctx->vq_index);
 #endif
 			if (vqp_ctx) {
 				total_handled_wqe += vrdma_dpa_handle_one_vqp(dtctx, ehctx, 
@@ -508,24 +512,39 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 				flexio_dev_db_ctx_force_trigger(dtctx,
 												ehctx->guest_db_cq_ctx.cqn,
 												emu_db_handle);
+				vrdma_debug_count_set(ehctx, 6);
 			}
-			//total_handled_wqe += vrdma_dpa_handle_actived_vqp(dtctx, ehctx);
-			vrdma_dpa_handle_dma_cqe(ehctx);
 		} else {
 			null_db_cqe_cnt++;
 		}
 
-		if (total_handled_wqe > VRDMA_TOTAL_WQE_BUDGET || 
-			null_db_cqe_cnt > VRDMA_CONT_NULL_CQE_BUDGET) {
+		for (vqp_idx = 0; vqp_idx < VQP_PER_THREAD; vqp_idx++) {
+			if (ehctx->vqp_ctx[vqp_idx].valid) {
+				vqp_daddr = ehctx->vqp_ctx[vqp_idx].vqp_ctx_handle;
+				total_handled_wqe += vrdma_dpa_handle_one_vqp(dtctx, ehctx, vqp_daddr);
+			}
+			if (total_handled_wqe > VRDMA_TOTAL_WQE_BUDGET) {
+				need_to_release = 1;
+				break;
+			}
+		}
+		vrdma_dpa_handle_dma_cqe(ehctx);
+
+		if (need_to_release) {
+			vrdma_debug_value_add(ehctx, 5, 1);
+			break;
+		}
+		if (null_db_cqe_cnt > VRDMA_CONT_NULL_CQE_BUDGET) {
+			vrdma_debug_value_add(ehctx, 6, 1);
 			break;
 		}
 	}
 
-	vrdma_debug_value_set(ehctx, 0, total_handled_wqe);
-	vrdma_debug_value_set(ehctx, 1, null_db_cqe_cnt);
+	vrdma_debug_value_add(ehctx, 0, total_handled_wqe);
+	vrdma_debug_value_add(ehctx, 1, null_db_cqe_cnt);
 	vrdma_debug_value_set(ehctx, 2, ehctx->dma_qp.hw_qp_sq_pi);
 	vrdma_debug_value_set(ehctx, 3, ehctx->guest_db_cq_ctx.cqn);
-	vrdma_debug_value_set(ehctx, 5, ehctx->guest_db_cq_ctx.ci);
+	vrdma_debug_value_set(ehctx, 4, ehctx->guest_db_cq_ctx.ci);
 	vrdma_debug_count_set(ehctx, 3);
 #if 0
 err_state:

@@ -816,7 +816,6 @@ static int vrdma_rw_wqe_submit(struct vrdma_send_wqe *wqe,
 #ifdef WQE_DBG
 	uint32_t idx;
 #endif
-	pid_t tid = gettid();
 
 	fm_ce_se = vrdma_get_send_flags(wqe);
 #ifdef WQE_DBG
@@ -843,8 +842,8 @@ static int vrdma_rw_wqe_submit(struct vrdma_send_wqe *wqe,
 	if (spdk_unlikely(!r_mkey)) {
 		/* qp error state for invalid key */
 		//vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, offset);
-		SPDK_ERRLOG("<tid %d> vqpn %d failed to get remote mkey, send err cqe\n",
-					tid, vqp->qp_idx);
+		SPDK_ERRLOG("vqpn %d failed to get remote mkey, send err cqe\n",
+					vqp->qp_idx);
 		return 0;
 	}
 	vqp->wait_vkey = wqe->rdma_rw.rkey;
@@ -861,9 +860,9 @@ static int vrdma_rw_wqe_submit(struct vrdma_send_wqe *wqe,
 	vrdma_set_ctrl_seg(ctrl, bk_qp->hw_qp.sq.pi, opcode, 0, bk_qp->hw_qp.qp_num,
 					fm_ce_se, ds, sig, imm);
 #ifdef WQE_DBG
-	SPDK_NOTICELOG("<tid %d> Dump wqe vqp_idx %d, r_vkey_idx 0x%x "
+	SPDK_NOTICELOG("Dump wqe vqp_idx %d, r_vkey_idx 0x%x "
 				"r_mkey 0x%x l_vkey_idx 0x%x l_mkey 0x%x\n",
-				tid, vqp->qp_idx, vqp->wait_vkey, vqp->last_r_mkey,
+				vqp->qp_idx, vqp->wait_vkey, vqp->last_r_mkey,
 				vqp->last_l_vkey, vqp->last_l_mkey);
 	idx = bk_qp->hw_qp.sq.pi & (bk_qp->hw_qp.sq.wqe_cnt - 1);
 	vrdma_dump_wqe(idx, ds, bk_qp);
@@ -1796,12 +1795,48 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 			vqp->dpa_vqp.dpa_thread->dpa_dma_qp->qp_num,
 		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_sqcq.cq_num,
 		 	vqp->dpa_vqp.dpa_thread->dpa_dma_qp->dma_q_rqcq.cq_num);
-		vrdma_prov_vq_query(vqp->dpa_vqp.dpa_thread);
 	} else {
 		printf("\nsnap_queue is %s, dpa_vq is %s, dma_q is %s\n",
 			vqp->snap_queue ? "not_null" : "null",
 			vqp->dpa_vqp.dpa_thread->dpa_dma_qp ? "not_null" : "null",
 			vqp->snap_queue->dma_q ? "not_null" : "null");
+	}
+}
+
+void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
+{
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+
+	if (dpa_thread_id >= MAX_DPA_THREAD) {
+		printf("invalid thread id %d\n", dpa_thread_id);
+		return;
+	}
+	
+	dpa_thread = &g_dpa_threads[dpa_thread_id];
+	if (!dpa_thread) {
+		printf("dpa thread is null\n");
+		return;
+	}
+	
+	printf("\n========= dpa thread debug info =========\n");
+	if (dpa_thread->sw_dma_qp && dpa_thread->sw_dma_qp->dma_q &&
+		dpa_thread->dpa_handler && dpa_thread->dpa_dma_qp) {
+		printf("hw_dbcq %#x, dpa thread idx %d, attached vqp num %d\n"
+			"sw_qp : %#x sqcq %#x rqcq %#x,\ndpa qp: %#x sqcq %#x rqcq %#x\n",
+			dpa_thread->dpa_handler->db_cq.cq_num, dpa_thread->thread_idx,
+			dpa_thread->attached_vqp_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_qp.hw_qp.qp_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_tx_cq.cq_num,
+		 	dpa_thread->sw_dma_qp->dma_q->sw_qp.dv_rx_cq.cq_num,
+			dpa_thread->dpa_dma_qp->qp_num,
+		 	dpa_thread->dpa_dma_qp->dma_q_sqcq.cq_num,
+		 	dpa_thread->dpa_dma_qp->dma_q_rqcq.cq_num);
+		vrdma_prov_vq_query(dpa_thread);
+	} else {
+		printf("\nsnap_queue is %s, dpa_handler is %s, dpa_dma_qp is %s\n",
+			dpa_thread->sw_dma_qp ? "not_null" : "null",
+			dpa_thread->dpa_handler ? "not_null" : "null",
+			dpa_thread->dpa_dma_qp ? "not_null" : "null");
 	}
 }
 

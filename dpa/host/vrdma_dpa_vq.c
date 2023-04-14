@@ -760,12 +760,12 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 				  			struct spdk_vrdma_qp *vqp)
 {
 	struct vrdma_dpa_vqp_ctx *eh_qp_data;
-	uint16_t vqp_idx = 0;
+	uint16_t slot_idx = 0;
 	flexio_status err;
 	uint64_t rpc_ret;
 	int ret = 0;
 
-	ret = vrdma_dpa_find_free_vqp_slot(dpa_thread->eh_ctx, &vqp_idx);
+	ret = vrdma_dpa_find_free_vqp_slot(dpa_thread->eh_ctx, &slot_idx);
 	if (ret) {
 		log_error("no free vqp slot in thread");
 		goto out;
@@ -784,9 +784,9 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 	eh_qp_data->arm_vq_ctx	= attr->arm_vq_ctx;
 	eh_qp_data->state = VRDMA_DPA_VQ_STATE_RDY;
 	eh_qp_data->eh_ctx_daddr = dpa_thread->heap_memory;
-	eh_qp_data->free_idx = vqp_idx;
-	vqp->dpa_vqp.ctx_idx = vqp_idx;
-	dpa_thread->eh_ctx->vqp_ctx[vqp_idx].valid = 1;
+	eh_qp_data->free_idx = slot_idx;
+	vqp->dpa_vqp.ctx_idx = slot_idx;
+	dpa_thread->eh_ctx->vqp_ctx[slot_idx].valid = 1;
 
 	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
 				     			eh_qp_data, sizeof(*eh_qp_data),
@@ -871,7 +871,6 @@ free_memory:
 out:
 	return ret;
 }
-
 
 static int vrdma_dpa_vqp_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *vqp,
 											struct vrdma_dpa_thread_ctx *dpa_thread)
@@ -1471,7 +1470,6 @@ static void vrdma_dpa_vq_dbg_stats_query(struct vrdma_dpa_thread_ctx *dpa_thread
 	flexio_uintptr_t dest_addr;
 	uint64_t func_ret;
 	int err;
-	int i;
 	
 	dpa_ctx = dpa_thread->dpa_ctx;
 	host_data = dpa_ctx->vq_data;
@@ -1498,15 +1496,26 @@ static void vrdma_dpa_vq_dbg_stats_query(struct vrdma_dpa_thread_ctx *dpa_thread
 		}
 		return;
 	}
-	log_notice("dpa_qp debug count");
-	// for (i = 0; i < VRDMA_MAX_DEBUG_COUNT && host_data->ehctx.debug_data.counter[i] != 0; i++) {
-	for (i = 0; i < VRDMA_MAX_DEBUG_COUNT; i++) {
-		log_notice("count[%d]: %d", i, host_data->ehctx.debug_data.counter[i]);
-	}
+	log_notice("dpa_qp debug count:");
 
-	for (i = 0; i < VRDMA_MAX_DEBUG_VALUE; i++) {
-		log_notice("value[%d]: %d", i, host_data->ehctx.debug_data.value[i]);
-	}
+	log_notice("into rpc num: %d", host_data->ehctx.debug_data.counter[0]);
+	log_notice("out from rpc num: %d", host_data->ehctx.debug_data.counter[1]);
+	log_notice("into db num: %d", host_data->ehctx.debug_data.counter[2]);
+	log_notice("out db num: %d", host_data->ehctx.debug_data.counter[3]);
+	log_notice("qp exceeds budget: %d", host_data->ehctx.debug_data.counter[4]);
+	log_notice("get cqe num: %d", host_data->ehctx.debug_data.counter[5]);
+	log_notice("fetch qp num: %d", host_data->ehctx.debug_data.counter[6]);
+	log_notice("set dma qp ce bit num: %d", host_data->ehctx.debug_data.counter[7]);
+
+	log_notice("total fetched wqes: %d", host_data->ehctx.debug_data.value[0]);
+	log_notice("non dbr cqe num: %d", host_data->ehctx.debug_data.value[1]);
+	log_notice("hw_qp_sq_pi: %d", host_data->ehctx.debug_data.value[2]);
+	log_notice("guest_db_cq_ctx.cqn: %d", host_data->ehctx.debug_data.value[3]);
+	log_notice("guest_db_cq_ctx.ci: %d", host_data->ehctx.debug_data.value[4]);
+	log_notice("total_handled_wqe > 8k: %d", host_data->ehctx.debug_data.value[5]);
+	log_notice("null_db_cqe_cnt > 6: %d", host_data->ehctx.debug_data.value[6]);
+	log_notice("last emu ctx id: %d", host_data->ehctx.debug_data.value[7]);
+	
 }
 
 static uint32_t vrdma_dpa_emu_db_to_cq_ctx_get_id(struct spdk_vrdma_qp *vqp)
