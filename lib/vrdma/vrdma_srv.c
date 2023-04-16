@@ -253,7 +253,7 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
     if (vqp->pre_bk_qp->poller_core == VRDMA_INVALID_POLLER_CORE) {
         vqp->pre_bk_qp->poller_core = mqp_idx;
         SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
-                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, pg->id);
+                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, mqp_idx);
     } else {
         SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
                        vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
