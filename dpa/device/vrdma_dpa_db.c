@@ -470,8 +470,10 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 	uint16_t null_db_cqe_cnt = 0;
 	struct vrdma_dev_cqe64 *db_cqe;
 	uint32_t emu_db_handle;
+#if 0
 	uint16_t vqp_idx;
 	flexio_uintptr_t vqp_daddr;
+#endif
 	uint8_t need_to_release = 0;
 
 	flexio_dev_get_thread_ctx(&dtctx);
@@ -517,6 +519,7 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 		} else {
 			null_db_cqe_cnt++;
 		}
+#if 0
 
 		for (vqp_idx = 0; vqp_idx < VQP_PER_THREAD; vqp_idx++) {
 			if (ehctx->vqp_ctx[vqp_idx].valid) {
@@ -528,6 +531,12 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 				break;
 			}
 		}
+#endif
+
+		if (total_handled_wqe > VRDMA_TOTAL_WQE_BUDGET) {
+			need_to_release = 1;
+		}
+		
 		vrdma_dpa_handle_dma_cqe(ehctx);
 
 		if (need_to_release) {

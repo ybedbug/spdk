@@ -260,6 +260,7 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
                        vqp->pre_bk_qp->poller_core);
     }
     pg = &ctrl->sctrl->pg_ctx.pgs[vqp->pre_bk_qp->poller_core];
+	pg->id = mqp_idx;
     /* init2rtr vqp join poller-group */
 	if (vrdma_sched_vq(ctrl->sctrl, vqp, pg)) {
 		SPDK_ERRLOG("vqp=%u failed to join poller group \n", vqp->qp_idx);
