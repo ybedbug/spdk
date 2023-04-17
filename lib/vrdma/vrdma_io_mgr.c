@@ -1045,8 +1045,9 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 #endif
         mqp_pi = backend_qp->hw_qp.sq.pi;
         if (mqp_pi - backend_qp->sq_ci >= backend_qp->qp_attr.sq_size) {
-            SPDK_ERRLOG("backend qp is full, mqp_pi=%u, sq_ci=%u, size=%u\n",
-                        mqp_pi, backend_qp->sq_ci, backend_qp->qp_attr.sq_size);
+            SPDK_ERRLOG("vqpn %d:backend qpn %x is full, mqp_pi=%u, sq_ci=%u, size=%u\n",
+                        vqp->qp_idx, backend_qp->qpnum, mqp_pi, backend_qp->sq_ci,
+                        backend_qp->qp_attr.sq_size);
             return false;
         }
         mqp_pi &= (backend_qp->hw_qp.sq.wqe_cnt - 1);
@@ -1808,6 +1809,11 @@ void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
 
 	if (dpa_thread_id >= MAX_DPA_THREAD) {
 		printf("invalid thread id %d\n", dpa_thread_id);
+		return;
+	}
+
+	if (!g_dpa_threads) {
+		printf("g_dpa_thread is NULL\n");
 		return;
 	}
 	
