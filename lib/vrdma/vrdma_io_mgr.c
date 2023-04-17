@@ -1006,7 +1006,10 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 	struct timespec start_tv, end_tv;
 	uint16_t mqp_pi;
 	struct mqp_sq_meta *sq_meta = NULL;
+
+#ifdef WQE_DBG
 	pid_t tid = gettid();
+#endif
 
 	clock_gettime(CLOCK_REALTIME, &start_tv);
 
@@ -1042,8 +1045,9 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 #endif
         mqp_pi = backend_qp->hw_qp.sq.pi;
         if (mqp_pi - backend_qp->sq_ci >= backend_qp->qp_attr.sq_size) {
-            SPDK_ERRLOG("<tid %d> backend qp is full, mqp_pi=%u, sq_ci=%u, size=%u\n",
-                        tid, mqp_pi, backend_qp->sq_ci, backend_qp->qp_attr.sq_size);
+            SPDK_ERRLOG("vqpn %d:backend qpn %x is full, mqp_pi=%u, sq_ci=%u, size=%u\n",
+                        vqp->qp_idx, backend_qp->qpnum, mqp_pi, backend_qp->sq_ci,
+                        backend_qp->qp_attr.sq_size);
             return false;
         }
         mqp_pi &= (backend_qp->hw_qp.sq.wqe_cnt - 1);
@@ -1075,8 +1079,8 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {	
 			vqp->sq.comm.pre_pi += i; 
 			vrdma_tx_complete(backend_qp);
-			SPDK_NOTICELOG("<tid %d> vrdam vqp=%p, is in wait state when submit, pre_pi %d\n", 
-							tid, vqp, vqp->sq.comm.pre_pi);
+			SPDK_NOTICELOG("vrdam vqp=%p, is in wait state when submit, pre_pi %d\n", 
+							vqp, vqp->sq.comm.pre_pi);
 			return true;
 		}
 	}
@@ -1090,10 +1094,6 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
                     tid, vqp->qp_idx, vqp->thread_id, sq_meta->vqp->qp_idx, vqp->local_pi,
                     vqp->sq.comm.pre_pi, backend_qp->qpnum,
                     backend_qp->hw_qp.sq.pi, backend_qp->sq_ci);
-#endif
-#ifdef WQE_DBG
-	SPDK_NOTICELOG("<tid %d> vrdam vqp=%p submit wqe done pre_pi=%d\n",
-					tid, vqp, vqp->sq.comm.pre_pi);
 #endif
 	clock_gettime(CLOCK_REALTIME, &end_tv);
 	vqp->stats.latency_submit =
@@ -1811,13 +1811,13 @@ void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
 		printf("invalid thread id %d\n", dpa_thread_id);
 		return;
 	}
-	
-	dpa_thread = &g_dpa_threads[dpa_thread_id];
-	if (!dpa_thread) {
-		printf("dpa thread is null\n");
+
+	if (!g_dpa_threads) {
+		printf("g_dpa_thread is NULL\n");
 		return;
 	}
 	
+	dpa_thread = &g_dpa_threads[dpa_thread_id];
 	printf("\n========= dpa thread debug info =========\n");
 	if (dpa_thread->sw_dma_qp && dpa_thread->sw_dma_qp->dma_q &&
 		dpa_thread->dpa_handler && dpa_thread->dpa_dma_qp) {
@@ -1844,11 +1844,11 @@ static void vrdma_qp_sm_poll_cq_ci_no_cb(struct spdk_vrdma_qp *vqp)
 {
 	int ret;
 	uint64_t ci_addr = vqp->sq_vcq->ci_pa;
-	pid_t tid = gettid();
 
 	clock_gettime(CLOCK_REALTIME, &g_end_tv);
 
 #ifdef POLL_PI_DBG
+	pid_t tid = gettid();
 	SPDK_NOTICELOG("<tid %d> vrdam poll sq vcq ci: doorbell pa 0x%lx\n", tid, ci_addr);
 #endif
 	vqp->q_comp.func = vrdma_qp_dummy_dma_cb;
@@ -1858,8 +1858,7 @@ static void vrdma_qp_sm_poll_cq_ci_no_cb(struct spdk_vrdma_qp *vqp)
 					  vqp->snap_queue->ctrl->xmkey->mkey, (uint64_t)&vqp->sq_vcq->pici->ci,
 					  vqp->sq_vcq->cqe_ci_mr->lkey, &vqp->q_comp);
 	if (spdk_unlikely(ret)) {
-		SPDK_ERRLOG("<tid %d> failed to read sq vcq CI, ret %d\n",
-					tid, ret);
+		SPDK_ERRLOG("failed to read sq vcq CI, ret %d\n", ret);
 		vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
 		return;
 	}
@@ -1884,7 +1883,9 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 	int ret;
 	uint32_t i;
 	struct vrdma_cqe *vcqe;
+#ifdef WQE_DBG
 	pid_t tid = gettid();
+#endif
 
 	clock_gettime(CLOCK_REALTIME, &g_cqe_tv);
 
@@ -1903,8 +1904,8 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 					tid, vqp->qp_idx, vcq->cq_idx, pi, pre_pi, vcq->pici->ci, vcqe->req_id, vcqe->owner);
 #endif
 	if (pi - vcq->pici->ci > vcq->cqe_entry_num) {
-		SPDK_ERRLOG("<tid %d> vcq full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
-					tid, pi, pre_pi, vcq->pici->ci);
+		SPDK_ERRLOG("vcq full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
+					pi, pre_pi, vcq->pici->ci);
 		return 0;
 	}
 
@@ -1930,8 +1931,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 							vqp->qp_mr->lkey, host_ring_addr,
 							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
 		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("<tid %d> no roll back failed to write back sq cqe, ret %d\n",
-						tid, ret);
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
 			return -1;
 		}
 		vqp->stats.sq_dma_tx_cnt++;
@@ -1954,8 +1954,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 							vqp->qp_mr->lkey, host_ring_addr,
 							vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
 		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("<tid %d> no roll back failed to write back sq cqe, ret %d\n",
-						tid, ret);
+			SPDK_ERRLOG("no roll back failed to write back sq cqe, ret %d\n", ret);
 			return -1;
 		}
 		vqp->stats.sq_dma_tx_cnt++;
@@ -1977,8 +1976,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 							  vqp->qp_mr->lkey, host_ring_addr,
 							  vqp->snap_queue->ctrl->xmkey->mkey, &vqp->q_comp);
 		if (spdk_unlikely(ret)) {
-			SPDK_ERRLOG("<tid %d> roll back failed to second write back sq cqe, ret %d\n",
-						tid, ret);
+			SPDK_ERRLOG("roll back failed to second write back sq cqe, ret %d\n", ret);
 			return -1;
 		}
 		vqp->stats.sq_dma_tx_cnt++;
@@ -2011,7 +2009,9 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 	struct timespec start_tv, end_tv;
 	struct mqp_sq_meta *sq_meta = NULL;
 	struct spdk_vrdma_qp *comp_vqp;
+#ifdef WQE_DBG
 	pid_t tid = gettid();
+#endif
 
 	clock_gettime(CLOCK_REALTIME, &start_tv);
 
@@ -2025,8 +2025,8 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 		if (cqe == NULL) {
 			/* if no available cqe, need to write prepared vcqes*/
 #ifdef POLL_PI_DBG
-			SPDK_NOTICELOG("<tid %d> null MCQE: gotton mcqe num %d, ci %d\n",
-							tid, cqe_num, vcq->pici->ci);
+			SPDK_NOTICELOG("null MCQE: gotton mcqe num %d, ci %d\n",
+							cqe_num, vcq->pici->ci);
 #endif
 			goto null_cqe;
 		}
@@ -2034,7 +2034,7 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 		sq_meta = &bk_qp->sq_meta_buf[wqe_idx];
 		comp_vqp = sq_meta->vqp;
 		if (!comp_vqp) {
-            SPDK_NOTICELOG("<tid %d> null vqp，vqp has been destroyed\n", tid);
+            SPDK_NOTICELOG("null vqp，vqp has been destroyed\n");
             continue;
 		}
 		//cqe_idx = vcq->pi & (vcq->cqe_entry_num - 1);
@@ -2056,8 +2056,7 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
         comp_vqp->stats.mcq_dbred_ci = mcq->ci;
         ret = vrdma_write_back_sq_cqe_no_cb(comp_vqp, 1);
 		if (spdk_unlikely(ret)) {
-            SPDK_ERRLOG("<tid %d> failed to write cq CQE entry, ret %d\n",
-						tid, ret);
+            SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
         }
         bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter);
 		vrdma_ring_mcq_db(mcq);
@@ -2150,7 +2149,6 @@ out:
 static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
 {
 	uint16_t pi, pre_pi;
-	pid_t tid = gettid();
 
 	if (spdk_unlikely(vqp->sw_state == VRDMA_QP_SW_STATE_SUSPENDED)) {
 		return;
@@ -2158,8 +2156,8 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 
 	if (spdk_unlikely(vqp->sw_state == VRDMA_QP_SW_STATE_FLUSHING)) {
 		vqp->sw_state = VRDMA_QP_SW_STATE_SUSPENDED;
-		SPDK_NOTICELOG("<tid %d> vqpn %d pi %d, state from flushing to %s\n",
-						tid, vqp->qp_idx, vqp->local_pi, get_vqp_sw_state(vqp));
+		SPDK_NOTICELOG("vqpn %d pi %d, state from flushing to %s\n",
+						vqp->qp_idx, vqp->local_pi, get_vqp_sw_state(vqp));
 		return;
 	}
 
@@ -2168,8 +2166,8 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 	
 	if (spdk_unlikely(vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT)) {
 		vrdma_handle_mkey_wait(vqp);
-		SPDK_NOTICELOG("<tid %d> vqp %d, is in mkey wait state, local pi %d\n",
-					tid, vqp->qp_idx, vqp->local_pi);
+		SPDK_NOTICELOG("vqp %d, is in mkey wait state, local pi %d\n",
+						vqp->qp_idx, vqp->local_pi);
 		return;
 	}
 
