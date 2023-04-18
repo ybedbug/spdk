@@ -61,11 +61,11 @@ _spdk_jsonrpc_client_send_request(struct spdk_jsonrpc_client *client)
 			request->send_offset += rc;
 			request->send_len -= rc;
 		}
-		/*if (request->send_len == 0) {
+		if (request->send_len == 0) {
 			STAILQ_REMOVE(&client->request, request,
 				spdk_jsonrpc_client_request, stailq);
 			spdk_jsonrpc_client_free_request(request);
-		}*/
+		}
 	}
 	pthread_spin_unlock(&client->request_lock);
 

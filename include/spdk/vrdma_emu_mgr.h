@@ -56,6 +56,7 @@ struct spdk_emu_ctx {
     struct spdk_poller *adminq_poller;
     struct spdk_poller *bar_event_poller;
     struct spdk_poller *io_poller;
+    struct spdk_poller *mig_poller; /* for vqp migration */
     size_t num_io_threads;
     struct spdk_emu_io_thread *io_threads;
     LIST_ENTRY(spdk_emu_ctx) entry;

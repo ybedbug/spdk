@@ -126,6 +126,7 @@ struct spdk_emu_ctx_ctrl_ops {
     void (*progress_mmio)(void *ctrl); /*ctrl bar event progress*/
     int (*progress_io)(void *ctrl);
     int (*progress_io_thread)(void *ctrl, int thread_id);
+    int (*progress_migration)(void *ctrl);
     /* stop accepting new requests and complete all outstaning
      * requests. The function is async */
     void (*suspend)(void *ctrl);
@@ -166,6 +167,13 @@ static inline int spdk_emu_progress_io(void *arg)
     return ctx->ctrl_ops->progress_io(ctx->ctrl);
 }
 
+static inline int spdk_emu_progress_migration(void *arg)
+{
+    struct spdk_emu_ctx *ctx = arg;
+
+    return ctx->ctrl_ops->progress_migration(ctx->ctrl);
+}
+
 static inline int spdk_emu_progress_io_thread(void *arg)
 {
     struct spdk_emu_io_thread *thread = arg;
@@ -181,6 +189,7 @@ static const struct spdk_emu_ctx_ctrl_ops spdk_emu_ctx_ctrl_ops_vrdma = {
     .progress_mmio = vrdma_ctrl_progress,
     .progress_io = vrdma_ctrl_progress_all_io,
     .progress_io_thread = vrdma_ctrl_progress_io,
+    .progress_migration = vrdma_ctrl_progress_migration,
     .suspend = vrdma_ctrl_suspend,
     .is_suspended = vrdma_ctrl_is_suspended,
     .resume = NULL
@@ -359,6 +368,14 @@ spdk_emu_ctx_create(const struct spdk_emu_ctx_create_attr *attr)
                                               ctx, 0);
         if (!ctx->io_poller) {
             SPDK_ERRLOG("failed to start general IO poller\n");
+            goto unregister_adminq_bar_poller;
+        }
+    }
+    if (is_vrdma_vqp_migration_enable()) {
+        ctx->mig_poller = spdk_poller_register(spdk_emu_progress_migration,
+                                               ctx, 500);
+        if (!ctx->mig_poller) {
+            SPDK_ERRLOG("failed to start migration poller\n");
             goto unregister_adminq_bar_poller;
         }
     }

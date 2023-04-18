@@ -43,9 +43,9 @@
 #include "spdk/likely.h"
 
 #include "spdk/vrdma_admq.h"
-#include "spdk/vrdma_qp.h"
 #include "spdk/vrdma_srv.h"
 #include "spdk/vrdma_controller.h"
+#include "spdk/vrdma_qp.h"
 #include "spdk/vrdma_emu_mgr.h"
 #include "spdk/vrdma_io_mgr.h"
 #include "spdk/vrdma_mr.h"

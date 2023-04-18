@@ -36,6 +36,7 @@
 #include "vrdma_admq.h"
 #include "vrdma_rpc.h"
 #include "vrdma_controller.h"
+#include "vrdma_migration.h"
 #include "snap_vrdma_virtq.h"
 
 #define VRDMA_INVALID_QPN 0xFFFFFFFF
@@ -58,19 +59,27 @@ struct snap_vrdma_backend_qp;
 
 struct mqp_sq_meta {
     uint16_t req_id;
+    uint16_t twqe_idx;
+    uint32_t first_psn;
+    uint32_t last_psn;
     struct spdk_vrdma_qp *vqp;
 };
 
 struct vrdma_backend_qp {
     struct ibv_pd *pd;
 #define VRDMA_INVALID_POLLER_CORE 0xFFFFFFFF
-    uint32_t poller_core;
+    uint32_t poller_core;                       /* is also this mqp index in tgid_node */
     struct snap_vrdma_backend_qp bk_qp;
     LIST_HEAD(, vrdma_vqp) vqp_list;
     uint32_t vqp_cnt;
     uint32_t remote_qpn;
     uint32_t qp_state;
     struct mqp_sq_meta *sq_meta_buf;
+#define MQP_DEPTH_SAMPLE_NUM 3
+    uint8_t  sample_curr;                        /* which sample to write */
+    uint16_t avg_depth;                          /* average depth */
+    uint16_t sample_depth[MQP_DEPTH_SAMPLE_NUM]; /* FIFO for samples */
+    struct vrdma_mqp_mig_ctx mig_ctx;
 };
 
 struct vrdma_vqp {
@@ -85,6 +94,9 @@ extern struct vrdma_tgid_list_head vrdma_tgid_list;
 struct spdk_vrdma_qp *
 find_spdk_vrdma_qp_by_idx(struct vrdma_ctrl *ctrl, uint32_t qp_idx);
 void vrdma_destroy_backend_qp(struct vrdma_backend_qp **local_mqp);
+int vrdma_query_bankend_qp_next_rcv_psn(struct vrdma_backend_qp *bk_qp,
+                                        uint32_t *next_rcv_psn);
+int vrdma_modify_backend_qp_to_err(struct vrdma_backend_qp *bk_qp);
 int vrdma_modify_backend_qp_to_init(struct vrdma_backend_qp *bk_qp);
 int vrdma_modify_backend_qp_to_rtr(struct vrdma_backend_qp *bk_qp,
 				struct ibv_qp_attr *qp_attr, int attr_mask,
@@ -112,6 +124,8 @@ vrdma_create_tgid_node(union ibv_gid *remote_tgid,
                        struct ibv_pd *local_pd,
                        uint16_t udp_sport_start,
                        uint32_t max_mqp_cnt);
+struct vrdma_tgid_node *
+vrdma_find_tgid_node_by_mqp(uint8_t mqp_idx, struct vrdma_backend_qp *mqp);
 struct vrdma_backend_qp *
 vrdma_create_backend_qp(struct vrdma_tgid_node *tgid_node,
                         uint8_t mqp_idx);
@@ -144,6 +158,7 @@ int vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 				     	struct spdk_vrdma_qp *vq, struct snap_pg *pg);
 void vrdma_desched_vq(struct spdk_vrdma_qp *vq);
 void vrdma_ctrl_destroy_dma_qp(struct vrdma_ctrl *ctrl);
-
-
+void vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node, int32_t specified_mqp);
+struct vrdma_backend_qp *
+vrdma_find_mqp_by_depth(struct vrdma_tgid_node *tgid_node, uint8_t *mqp_idx);
 #endif

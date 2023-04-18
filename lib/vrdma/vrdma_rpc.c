@@ -216,6 +216,12 @@ spdk_vrdma_rpc_qp_msg_decoder[] = {
         true
     },
     {
+        "next_rcv_psn",
+        offsetof(struct spdk_vrdma_rpc_qp_msg, next_rcv_psn),
+        spdk_json_decode_uint32,
+        true
+    },
+    {
         "ltgid_prefix",
         offsetof(struct spdk_vrdma_rpc_qp_msg, local_tgid.global.subnet_prefix),
         spdk_json_decode_uint64,
@@ -342,16 +348,17 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
         goto free_attr;
     }
     SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x\n"
-                   "qp_state=0x%x mqp_idx =0x%x local_tgid.prefix=0x%llx local_tgid.ip=0x%llx \n"
+                   "qp_state=0x%x mqp_idx =0x%x next_rcv_psn=%u \n"
+                   "local_tgid.prefix=0x%llx local_tgid.ip=0x%llx \n"
                    "remote_tgid.prefix=0x%llx remote_tgid.ip=0x%llx \n"
                    "local_mgid.prefix=0x%llx local_mgid.ip=0x%llx\n"
                    "remote_mgid.prefix=0x%llx remote_mgid.ip=0x%llx\n",
                    attr->emu_manager, attr->request_id, attr->sf_mac, attr->bk_qpn,
-                   attr->qp_state, attr->mqp_idx, attr->local_tgid.global.subnet_prefix,
-                   attr->local_tgid.global.interface_id, attr->remote_tgid.global.subnet_prefix,
-                   attr->remote_tgid.global.interface_id, attr->local_mgid.global.subnet_prefix,
-                   attr->local_mgid.global.interface_id, attr->remote_mgid.global.subnet_prefix,
-                   attr->remote_mgid.global.interface_id);
+                   attr->qp_state, attr->mqp_idx, attr->next_rcv_psn,
+                   attr->local_tgid.global.subnet_prefix, attr->local_tgid.global.interface_id,
+                   attr->remote_tgid.global.subnet_prefix, attr->remote_tgid.global.interface_id,
+                   attr->local_mgid.global.subnet_prefix, attr->local_mgid.global.interface_id,
+                   attr->remote_mgid.global.subnet_prefix, attr->remote_mgid.global.interface_id);
 
     ctx = spdk_emu_ctx_find_by_gid_ip(attr->emu_manager, attr->remote_mgid.global.interface_id);
     if (ctx) {
@@ -370,9 +377,15 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
         goto free_attr;
     }
     mqp = tgid_node->src_udp[attr->mqp_idx].mqp;
-    if (mqp->qp_state != IBV_QPS_RTS) {
+    if (is_vrdma_vqp_migration_enable() && mqp->qp_state == IBV_QPS_ERR) {
+        mqp->mig_ctx.mig_rnxt_rcv_psn = attr->next_rcv_psn;
+        vrdma_mig_set_mqp_repost_pi(mqp);
+    } else if (mqp->qp_state != IBV_QPS_RTS) {
         if (mqp->qp_state == IBV_QPS_INIT) {
             spdk_vrdma_set_qp_attr(ctrl, tgid_node, attr, &qp_attr, &attr_mask, &rdy_attr);
+            if (is_vrdma_vqp_migration_enable()) {
+                vrdma_mig_set_mqp_pmtu(mqp, &qp_attr);
+            }
             vrdma_modify_backend_qp_to_rtr(mqp, &qp_attr, attr_mask, &rdy_attr);
             vrdma_qp_notify_remote_by_rpc(ctrl, tgid_node, attr->mqp_idx);
         }
@@ -387,10 +400,6 @@ free_attr:
     free(attr);
 close_rpc:
 	spdk_jsonrpc_client_free_response(resp);
-    if (request_id && client->client_conn) {
-        spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
-            request_id);
-    }
     return;
 }
 
@@ -447,6 +456,7 @@ spdk_vrdma_rpc_qp_info_json(struct spdk_vrdma_rpc_qp_msg *info,
     spdk_json_write_named_uint32(w, "bkqpn", info->bk_qpn);
     spdk_json_write_named_uint32(w, "state", info->qp_state);
     spdk_json_write_named_uint32(w, "mqp_idx", info->mqp_idx);
+    spdk_json_write_named_uint32(w, "next_rcv_psn", info->next_rcv_psn);
     spdk_json_write_named_uint64(w, "ltgid_prefix", info->local_tgid.global.subnet_prefix);
     spdk_json_write_named_uint64(w, "ltgid_ip", info->local_tgid.global.interface_id);
     spdk_json_write_named_uint64(w, "rtgid_prefix", info->remote_tgid.global.subnet_prefix);
@@ -673,6 +683,9 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
     }
     if (mqp->qp_state == IBV_QPS_INIT) {
         spdk_vrdma_set_qp_attr(ctrl, tgid_node, attr, &qp_attr, &attr_mask, &rdy_attr);
+        if (is_vrdma_vqp_migration_enable()) {
+            vrdma_mig_set_mqp_pmtu(mqp, &qp_attr);
+        }
         if (vrdma_modify_backend_qp_to_rtr(mqp, &qp_attr, attr_mask, &rdy_attr))
             goto invalid;
     }
@@ -680,6 +693,14 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
         if (vrdma_modify_backend_qp_to_rts(mqp))
             goto invalid;
         set_spdk_vrdma_bk_qp_active(mqp);
+    }
+    if (attr->qp_state == IBV_QPS_ERR) {
+        /* to query local nxt_rcv_psn, only happen when migration is enabled */
+        if (!is_vrdma_vqp_migration_enable()) {
+            SPDK_ERRLOG("migration disabled, should not recv such msg\n");
+            goto invalid;
+        }
+        vrdma_query_bankend_qp_next_rcv_psn(mqp, &mqp->mig_ctx.mig_lnxt_rcv_psn);
     }
     vrdma_set_rpc_msg_with_mqp_info(ctrl, tgid_node, attr->mqp_idx, &msg);
 
@@ -763,10 +784,6 @@ free_attr:
     free(attr);
 close_rpc:
 	spdk_jsonrpc_client_free_response(resp);
-    if (request_id && client->client_conn) {
-        spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
-            request_id);
-    }
     return;
 }
 
@@ -1072,6 +1089,9 @@ struct spdk_vrdma_rpc_controller_configue_attr {
 	int32_t show_vqpn;
 	int32_t dpa_thread_id;
     int backend_mtu;
+    int32_t tgid;
+    int32_t show_mqp;
+    int32_t modify_mqp;
 };
 
 static const struct spdk_json_object_decoder
@@ -1188,6 +1208,24 @@ spdk_vrdma_rpc_controller_configue_decoder[] = {
         spdk_json_decode_int32,
         true
     },
+    {
+        "tgid",
+        offsetof(struct spdk_vrdma_rpc_controller_configue_attr, tgid),
+        spdk_json_decode_int32,
+        true
+    },
+    {
+        "show_mqp",
+        offsetof(struct spdk_vrdma_rpc_controller_configue_attr, show_mqp),
+        spdk_json_decode_int32,
+        true
+    },
+    {
+        "modify_mqp",
+        offsetof(struct spdk_vrdma_rpc_controller_configue_attr, modify_mqp),
+        spdk_json_decode_int32,
+        true
+    },
 };
 
 static struct spdk_emu_ctx *
@@ -1301,6 +1339,7 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
     struct vrdma_ctrl *ctrl;
     struct spdk_vrdma_qp *vqp;
     bool send_vqp_result = false;
+    struct vrdma_tgid_node *tgid_node = NULL;
 
     attr = calloc(1, sizeof(*attr));
     if (!attr)
@@ -1315,6 +1354,9 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
 	attr->show_vqpn = -1;
 	attr->dpa_thread_id = -1;
     attr->backend_mtu = -1;
+    attr->tgid = -1;
+    attr->show_mqp = -1;
+    attr->modify_mqp = -1;
 
     if (spdk_json_decode_object(params,
             spdk_vrdma_rpc_controller_configue_decoder,
@@ -1569,6 +1611,17 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
 	if (attr->dpa_thread_id != -1) {
 		vrdma_dump_dpa_thread_stats(attr->dpa_thread_id);
     }
+    if (attr->tgid != -1) {
+        struct vrdma_tgid_node *tmp_node;
+        LIST_FOREACH_SAFE(tgid_node, &vrdma_tgid_list, entry, tmp_node) {
+            if (attr->modify_mqp == -1) {
+                vrdma_dump_tgid_node(tgid_node, attr->show_mqp);
+            } else {
+                vrdma_modify_backend_qp_to_err(tgid_node->src_udp[attr->modify_mqp].mqp);
+            }
+        }
+    }
+
     w = spdk_jsonrpc_begin_result(request);
     if (send_vqp_result)
         spdk_vrdma_rpc_vqp_info_json(ctrl, vqp, w);

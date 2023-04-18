@@ -40,7 +40,6 @@
 #include "snap_mr.h"
 #include "snap_dma.h"
 #include "snap_vrdma_virtq.h"
-
 #include "dpa/host/vrdma_dpa_vq.h"
 
 //#define CX7
@@ -231,9 +230,14 @@ struct vrdma_q_comm {
 	uint16_t num_to_parse;
 };
 
+struct vqp_sq_meta {
+    uint32_t mqp_wqe_idx;                       /* which mqp wqe idx was mapped to */
+};
+
 struct vrdma_sq {
 	struct vrdma_q_comm comm;
 	struct vrdma_send_wqe *sq_buff; /* wqe buff */
+	struct vqp_sq_meta *meta_buff;
 	struct vrdma_cqe *local_cq_buff;
 };
 
@@ -252,6 +256,16 @@ struct vrdma_vkey_entry {
 };
 struct vrdma_vkey_tbl {
 	struct vrdma_vkey_entry vkey[VRDMA_DEV_MAX_MR];
+};
+
+struct vrdma_vqp_mig_ctx {
+#define VRDMA_MIG_INTERVAL_MIN     5*60 /* 5 seconds */
+    uint64_t mig_start_ts;              /* start timestamp of last migration */
+    uint8_t  mig_state;                 /* IDLE, PREPARE, START */
+    uint8_t  mig_repost;                /* 1 means need repost wqe */
+    uint16_t mig_repost_pi;             /* from which wqe to repost wqe */
+    uint32_t mig_wqe_len;               /* tmp buf to save wqe total data len */
+    struct vrdma_backend_qp *mig_mqp;   /* mqp to be migrated to */
 };
 
 struct spdk_vrdma_qp {
@@ -307,6 +321,8 @@ struct spdk_vrdma_qp {
 	struct vrdma_qp_stats stats;
 	uint16_t local_pi;
 	uint16_t sw_state;
+	uint16_t sq_ci;
+	struct vrdma_vqp_mig_ctx mig_ctx;
 };
 
 struct spdk_vrdma_dev {
