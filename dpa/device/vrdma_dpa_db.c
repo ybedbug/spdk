@@ -531,11 +531,12 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 				break;
 			}
 		}
-#endif
+#else
 
 		if (total_handled_wqe > VRDMA_TOTAL_WQE_BUDGET) {
 			need_to_release = 1;
 		}
+#endif
 		
 		vrdma_dpa_handle_dma_cqe(ehctx);
 
