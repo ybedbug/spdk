@@ -160,7 +160,7 @@ void vrdma_ctrl_progress(void *arg)
     struct vrdma_ctrl *ctrl = arg;
 
     snap_vrdma_ctrl_progress(ctrl->sctrl);
-    spdk_vrdma_vkey_age_progress();
+    //spdk_vrdma_vkey_age_progress();
 }
 
 #ifndef HAVE_SPDK_POLLER_BUSY
