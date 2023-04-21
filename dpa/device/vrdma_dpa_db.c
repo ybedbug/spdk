@@ -355,9 +355,9 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 	struct vrdma_dpa_vqp_ctx *vqp_ctx;
 	uint16_t rq_pi = 0, rq_pi_last = 0;
 	uint16_t sq_pi = 0, sq_pi_last = 0;
-	uint16_t each_loop_wqe = 0;
+	//uint16_t each_loop_wqe = 0;
 	uint16_t total_wqe = 0;
-	uint16_t wqe_loop = 0, null_loop = 0;
+	uint16_t wqe_loop = 0;
 	uint32_t start_cycles, end_cycles;
 	uint32_t avr_cycles;
 
@@ -381,43 +381,38 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 	rq_pi_last = vqp_ctx->rq_last_fetch_start;
 	sq_pi_last = vqp_ctx->sq_last_fetch_start;
 
+	fence_rw();
 	rq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.rq_pi_paddr);
 	sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 	start_cycles = vrdma_dpa_cpu_cyc_get();
 
 	//while ((rq_pi_last != rq_pi) ||
-	 //	(sq_pi_last != sq_pi))
-	 while (1)
-	{
-	#if 0
+	while(sq_pi_last != sq_pi) {
+	//while (1) {
+#if 0
 		if (rq_pi_last != rq_pi) {
 			vrdma_dpa_rq_process(ehctx, vqp_ctx, rq_pi, rq_pi_last);
 			total_wqe += each_loop_wqe = rq_pi - rq_pi_last;
 			rq_pi_last = rq_pi;
 		}
-	#endif
+#endif
 		
-		if (sq_pi_last != sq_pi) {
+		//if (sq_pi_last != sq_pi) {
 			vrdma_dpa_sq_process(ehctx, vqp_ctx, sq_pi, sq_pi_last);
-			total_wqe += each_loop_wqe = sq_pi - sq_pi_last;
+			total_wqe += sq_pi - sq_pi_last;
 			sq_pi_last = sq_pi;
-		}
+		//}
 		//vrdma_debug_count_set(ehctx, 6);
-		if (each_loop_wqe) {
+		//if (each_loop_wqe) {
 			flexio_dev_dbr_sq_set_pi((uint32_t *)ehctx->dma_qp.dbr_daddr + 1,
 								ehctx->dma_qp.hw_qp_sq_pi);
 			flexio_dev_qp_sq_ring_db(dtctx, ehctx->dma_qp.hw_qp_sq_pi,
 								ehctx->dma_qp.qp_num);
-			each_loop_wqe = 0;
-			null_loop = 0;
-			wqe_loop++;
-		} else {
-			//null_loop++;	
-		}
+			//each_loop_wqe = 0;
+		//}
 		
 		if (total_wqe > VRDMA_VQP_HANDLE_BUDGET || 
-			wqe_loop > 32 ||
-			null_loop > 512) {
+			wqe_loop++ > 32) {
 			break;
 		}
 #if 0		
@@ -430,7 +425,7 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 			goto out;
 		}
 #endif
-		fence_i();
+		fence_rw();
 		sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 
 	}
@@ -578,7 +573,7 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 			vrdma_debug_value_add(ehctx, 5, 1);
 			break;
 		}
-		if (null_db_cqe_cnt > 16) {
+		if (null_db_cqe_cnt > 6) {
 			//printf("total handled wqe %d.\n", total_handled_wqe);
 			vrdma_debug_value_add(ehctx, 6, 1);
 			break;
