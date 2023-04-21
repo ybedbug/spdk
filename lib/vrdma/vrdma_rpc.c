@@ -100,6 +100,10 @@ static void
 spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
 {
     pthread_spin_lock(&vrdma_rpc_lock);
+    if (!spdk_jsonrpc_client_request_list_empty(client->client_conn)) {
+        pthread_spin_unlock(&vrdma_rpc_lock);
+        return;
+    }
     if (client->client_conn_poller) {
 	    spdk_poller_unregister(&client->client_conn_poller);
         client->client_conn_poller = NULL;
@@ -386,11 +390,8 @@ close_rpc:
     if (request_id && client->client_conn) {
         spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
             request_id);
-        if (spdk_jsonrpc_client_request_list_empty(client->client_conn))
-            spdk_vrdma_close_rpc_client(client);
-    } else {
-        spdk_vrdma_close_rpc_client(client);
     }
+    spdk_vrdma_close_rpc_client(client);
     return;
 }
 
@@ -766,11 +767,8 @@ close_rpc:
     if (request_id && client->client_conn) {
         spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
             request_id);
-        if (spdk_jsonrpc_client_request_list_empty(client->client_conn))
-            spdk_vrdma_close_rpc_client(client);
-    } else {
-        spdk_vrdma_close_rpc_client(client);
     }
+    spdk_vrdma_close_rpc_client(client);
     return;
 }
 
