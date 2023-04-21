@@ -52,6 +52,7 @@ void spdk_vrdma_ctx_stop(void (*fini_cb)(void))
 	vrdma_dev_mac_list_del();
 	vrdma_del_indirect_mkey_list();
 	vrdma_del_r_vkey_list();
+    spdk_vrdma_close_rpc_client(&g_vrdma_rpc.client);
 }
 
 int spdk_vrdma_ctx_start(struct spdk_vrdma_ctx *vrdma_ctx)
@@ -90,7 +91,7 @@ int spdk_vrdma_ctx_start(struct spdk_vrdma_ctx *vrdma_ctx)
 		goto err;
 	}
 	ibv_free_device_list(list);
-    pthread_spin_init(&vrdma_rpc_lock, PTHREAD_PROCESS_PRIVATE);	
+    pthread_spin_init(&vrdma_rpc_lock, PTHREAD_PROCESS_PRIVATE);
     spdk_vrdma_init_vkey_lock();
 	/*Create static PF device*/
 	for (dev_count = 0; (uint32_t)dev_count < sctx->vrdma_pfs.num_emulated_pfs;

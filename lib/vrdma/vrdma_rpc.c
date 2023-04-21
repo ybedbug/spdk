@@ -96,7 +96,7 @@ spdk_vrdma_rpc_client_check_timeout(struct spdk_vrdma_rpc_client *client)
 	return 0;
 }
 
-static void
+void
 spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
 {
     pthread_spin_lock(&vrdma_rpc_lock);
@@ -108,7 +108,7 @@ spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client)
 	    spdk_poller_unregister(&client->client_conn_poller);
         client->client_conn_poller = NULL;
     }
-	if (client->client_conn) {	
+	if (client->client_conn) {
         spdk_jsonrpc_client_close(client->client_conn);
         client->client_conn = NULL;
     }

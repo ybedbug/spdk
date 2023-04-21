@@ -143,4 +143,6 @@ int spdk_vrdma_rpc_send_qp_msg(const char *addr,
                 struct spdk_vrdma_rpc_qp_msg *msg);
 int spdk_vrdma_rpc_send_mkey_msg(const char *addr,
                 struct spdk_vrdma_rpc_mkey_msg *msg);
+void
+spdk_vrdma_close_rpc_client(struct spdk_vrdma_rpc_client *client);
 #endif
