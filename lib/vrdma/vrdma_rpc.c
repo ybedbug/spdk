@@ -391,7 +391,6 @@ close_rpc:
         spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
             request_id);
     }
-    spdk_vrdma_close_rpc_client(client);
     return;
 }
 
@@ -768,7 +767,6 @@ close_rpc:
         spdk_jsonrpc_client_remove_request_from_list(client->client_conn,
             request_id);
     }
-    spdk_vrdma_close_rpc_client(client);
     return;
 }
 
