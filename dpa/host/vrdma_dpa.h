@@ -20,9 +20,6 @@
 #include "lib/vrdma/vrdma_providers.h"
 #include "dpa/vrdma_dpa_common.h"
 
-#define VRDMA_MAX_CORES_AVAILABLE 10
-#define VRDMA_MAX_HARTS_PER_CORE  16
-
 #define VRDMA_DPA_RPC_UNPACK_FUNC "vrdma_dpa_rpc_unpack_func"
 
 struct vrdma_dpa_ctx {

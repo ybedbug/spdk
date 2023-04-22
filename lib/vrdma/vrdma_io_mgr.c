@@ -1748,6 +1748,12 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 	printf("sf_name %s, gvmi 0x%x, spdk_core %d, pg_core %d\n", 
 			ctrl->vdev->vrdma_sf.sf_name, ctrl->vdev->vrdma_sf.gvmi,
 			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
+	printf("\nsq_wqe_buff_pa %#lx, sq_pi_paddr %#lx,"
+			"sq_wqebb_cnt %#x, sq_wqebb_size %#x,\nemu_crossing_mkey %#x,"
+			"sf_crossing_mkey %#x\n", vqp->sq.comm.wqe_buff_pa,
+			vqp->sq.comm.doorbell_pa, vqp->sq.comm.wqebb_cnt,
+			vqp->sq.comm.wqebb_size, ctrl->sctrl->xmkey->mkey,
+			ctrl->sctrl->xmkey->mkey);
 	if (vqp->pre_bk_qp)
 		printf("vqpn 0x%x, pre_bk_qp 0x%x\n", vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum);
 	printf("sq pi  %-10d       sq pre pi  %-10d\n",
@@ -2111,8 +2117,8 @@ static int vrdma_handle_mkey_wait(struct spdk_vrdma_qp *vqp)
 	/* Waiting remote mkey*/
 	clock_gettime(CLOCK_REALTIME, &end_tv);
 	if ((end_tv.tv_sec - vqp->mkey_tv.tv_sec) > VRDMA_RPC_MKEY_TIMEOUT_S) {
-		//SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
-		//			(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
+		SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
+					(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
 		/* qp error state for invalid key */
 		//vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, 0);
 		return -1;
