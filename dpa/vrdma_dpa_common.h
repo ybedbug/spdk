@@ -41,9 +41,14 @@
 
 #define VQP_PER_THREAD 128 
 #define MAX_DPA_THREAD 8 //((VRDMA_MAX_CORES_AVAILABLE - 1) * VRDMA_MAX_HARTS_PER_CORE)
-#define VRDMA_VQP_HANDLE_BUDGET 1024 
+#define MAX_VQP_NUM (VQP_PER_THREAD * MAX_DPA_THREAD)
+
+#define VRDMA_VQP_LOOP_BUDGET 16
+#define VRDMA_VQP_WQE_BUDGET 1024 
 #define VRDMA_TOTAL_WQE_BUDGET (8 * 1024)
 #define VRDMA_CONT_NULL_CQE_BUDGET 32
+#define VRDMA_DBR_CQE_BUGET 16
+
 #define VRDMA_CQ_WAIT_THRESHOLD(cq_len)  (cq_len >> 2)
 
 enum{
@@ -100,7 +105,7 @@ struct vrdma_dpa_cq_ctx {
 	struct flexio_dev_cqe64 *cqe;
 	uint32_t *dbr;
 	uint8_t hw_owner_bit;
-	uint32_t log_cq_depth;
+	uint32_t cq_depth;
 };
 
 /* vrdma_dpa_vq_state values:
@@ -178,6 +183,11 @@ struct vrdma_dpa_qp_info {
 	flexio_uintptr_t vqp_ctx_handle;
 };
 
+struct vrdma_dpa_emu_ctx_info {
+	uint16_t valid;
+	flexio_uintptr_t vqp_ctx_handle;
+};
+
 struct vrdma_dpa_event_handler_ctx {
 	uint32_t dbg_signature; /*Todo: used to confirm event handler is right*/
 	struct spinlock_s vqp_array_lock;
@@ -200,6 +210,7 @@ struct vrdma_dpa_event_handler_ctx {
 	uint32_t ce_set_threshold;
 	uint16_t vqp_count;
 	struct vrdma_dpa_qp_info vqp_ctx[VQP_PER_THREAD];
+	struct vrdma_dpa_emu_ctx_info vqp_ctx_hdl[MAX_VQP_NUM];
 };
 
 struct vrdma_dpa_vq_data {

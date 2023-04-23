@@ -597,7 +597,7 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 	eh_data->guest_db_cq_ctx.dbr = (uint32_t *)thread->dpa_handler->db_cq.cq_dbr_daddr;
 	eh_data->guest_db_cq_ctx.cqe = eh_data->guest_db_cq_ctx.ring;
 	eh_data->guest_db_cq_ctx.hw_owner_bit = 0;
-	eh_data->guest_db_cq_ctx.log_cq_depth = thread->dpa_handler->db_cq.log_cq_size;
+	eh_data->guest_db_cq_ctx.cq_depth = POW2(thread->dpa_handler->db_cq.log_cq_size);
 
 	/*prepare msix handler qp.rq.cq ctx*/
 	eh_data->msix_cq_ctx.cqn = flexio_cq_get_cq_num(thread->dpa_dma_qp->dma_q_rqcq.cq);
@@ -605,7 +605,7 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 		(struct flexio_dev_cqe64 *)thread->dpa_dma_qp->dma_q_rqcq.cq_ring_daddr;
 	eh_data->msix_cq_ctx.dbr = (uint32_t *)thread->dpa_dma_qp->dma_q_rqcq.cq_dbr_daddr;
 	eh_data->msix_cq_ctx.cqe = eh_data->msix_cq_ctx.ring;
-	eh_data->msix_cq_ctx.log_cq_depth = thread->dpa_dma_qp->dma_q_rqcq.log_cq_size;
+	eh_data->msix_cq_ctx.cq_depth = POW2(thread->dpa_dma_qp->dma_q_rqcq.log_cq_size);
 	eh_data->msix_cq_ctx.hw_owner_bit = 1;
 
 	/*prepare dma_qp address*/
@@ -622,9 +622,9 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 		(struct flexio_dev_cqe64 *)thread->dpa_dma_qp->dma_q_sqcq.cq_ring_daddr;
 	eh_data->dma_sqcq_ctx.dbr = (uint32_t *)thread->dpa_dma_qp->dma_q_sqcq.cq_dbr_daddr;
 	eh_data->dma_sqcq_ctx.cqe = eh_data->dma_sqcq_ctx.ring;
-	eh_data->dma_sqcq_ctx.log_cq_depth = thread->dpa_dma_qp->dma_q_sqcq.log_cq_size;
+	eh_data->dma_sqcq_ctx.cq_depth = POW2(thread->dpa_dma_qp->dma_q_sqcq.log_cq_size);
 	eh_data->dma_sqcq_ctx.hw_owner_bit = 0;
-	//log_error("eh_data->dma_sqcq_ctx.log_cq_depth %d", eh_data->dma_sqcq_ctx.log_cq_depth);
+	//log_error("eh_data->dma_sqcq_ctx.cq_depth %d", eh_data->dma_sqcq_ctx.cq_depth);
 	/* Update other pointers */
 	eh_data->dma_qp.state = VRDMA_DPA_VQ_STATE_INIT;
 	eh_data->emu_outbox = flexio_outbox_get_id(dpa_ctx->db_outbox);
@@ -791,6 +791,8 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 	eh_qp_data->free_idx = slot_idx;
 	vqp->dpa_vqp.ctx_idx = slot_idx;
 	dpa_thread->eh_ctx->vqp_ctx[slot_idx].valid = 1;
+	dpa_thread->eh_ctx->vqp_ctx_hdl[attr->emu_db_handler].vqp_ctx_handle = vqp->dpa_vqp.dpa_heap_memory;
+	dpa_thread->eh_ctx->vqp_ctx_hdl[attr->emu_db_handler].valid = 1;
 
 	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
 				     			eh_qp_data, sizeof(*eh_qp_data),
@@ -895,7 +897,7 @@ static int vrdma_dpa_vqp_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdm
 										vqp->qdb_idx, 
 										flexio_cq_get_cq_num(dpa_thread->dpa_handler->db_cq.cq),
 										&vqp->dpa_vqp.emu_db_to_cq_id);
-	if (!vqp->dpa_vqp.devx_emu_db_to_cq_ctx) {
+	if (!vqp->dpa_vqp.devx_emu_db_to_cq_ctx || vqp->dpa_vqp.emu_db_to_cq_id >= MAX_VQP_NUM) {
 		log_error("Failed to map cq_to_db, vhca_id %d, qdb_idx%d, cqn %d, emu_db_to_cq_id %d",
 			   		ctrl->sctrl->sdev->pci->mpci.vhca_id, vqp->qdb_idx,
 			   		flexio_cq_get_cq_num(dpa_thread->dpa_handler->db_cq.cq), 

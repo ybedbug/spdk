@@ -112,6 +112,8 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	ectx->vqp_ctx[free_idx].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
 	ectx->vqp_count++;
 	ectx->dma_qp.state = VRDMA_DPA_VQ_STATE_RDY;
+	ectx->vqp_ctx_hdl[vqp_ctx->emu_db_to_cq_id].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
+	ectx->vqp_ctx_hdl[vqp_ctx->emu_db_to_cq_id].valid = valid;
 	spin_unlock(&ectx->vqp_array_lock);
 	//vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
