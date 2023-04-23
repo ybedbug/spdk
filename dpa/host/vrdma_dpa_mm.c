@@ -33,8 +33,6 @@ int vrdma_dpa_mm_zalloc(struct flexio_process *process, size_t buff_bsize,
 		goto err_memeset;
 	}
 
-	log_info("process %llx, get dpa addr %llx, input dpa addr pointer %llx", process, *dest_daddr_p, dest_daddr_p);
-
 	return 0;
 
 err_memeset:

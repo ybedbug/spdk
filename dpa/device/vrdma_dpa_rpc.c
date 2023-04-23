@@ -76,6 +76,7 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	flexio_dev_get_thread_ctx(&dtctx);
 	vqp_ctx = (struct vrdma_dpa_vqp_ctx *)arg1;
 	ectx = (struct vrdma_dpa_event_handler_ctx *)vqp_ctx->eh_ctx_daddr;
+	vrdma_debug_count_set(ectx, 0);
 
 	/* insert new added vqp to thread ctx */
 	free_idx = vqp_ctx->free_idx;
@@ -105,19 +106,20 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 		return 0;
 	}
 #endif
+	fence_rw();
 	ectx->vqp_ctx[free_idx].emu_db_handle = vqp_ctx->emu_db_to_cq_id;
 	ectx->vqp_ctx[free_idx].valid = valid;
 	ectx->vqp_ctx[free_idx].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
 	ectx->vqp_count++;
 	ectx->dma_qp.state = VRDMA_DPA_VQ_STATE_RDY;
-	fence_rw();
+	ectx->vqp_ctx_hdl[vqp_ctx->emu_db_to_cq_id].vqp_ctx_handle = (flexio_uintptr_t)vqp_ctx;
+	ectx->vqp_ctx_hdl[vqp_ctx->emu_db_to_cq_id].valid = valid;
 	spin_unlock(&ectx->vqp_array_lock);
-	vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
+	//vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	printf("\n vrdma_qp_rpc_handler get free idx %d, db handle %d, vqp_ctx_handle %llx, vqp idx %d\n",
 			free_idx, vqp_ctx->emu_db_to_cq_id, (flexio_uintptr_t)vqp_ctx, vqp_ctx->vq_index);
 #endif
-	vrdma_debug_count_set(ectx, 0);
 	flexio_dev_outbox_config(dtctx, ectx->emu_outbox);
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	printf("\n vrdma_qp_rpc_handler cqn: %#x, emu_db_to_cq_id %d,"

@@ -1079,8 +1079,10 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {	
 			vqp->sq.comm.pre_pi += i; 
 			vrdma_tx_complete(backend_qp);
+#ifdef WQE_DBG
 			SPDK_NOTICELOG("vrdam vqp=%p, is in wait state when submit, pre_pi %d\n", 
 							vqp, vqp->sq.comm.pre_pi);
+#endif
 			return true;
 		}
 	}
@@ -1746,6 +1748,12 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 	printf("sf_name %s, gvmi 0x%x, spdk_core %d, pg_core %d\n", 
 			ctrl->vdev->vrdma_sf.sf_name, ctrl->vdev->vrdma_sf.gvmi,
 			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
+	printf("\nsq_wqe_buff_pa %#lx, sq_pi_paddr %#lx,"
+			"sq_wqebb_cnt %#x, sq_wqebb_size %#x,\nemu_crossing_mkey %#x,"
+			"cq_host_pa %#x, cq_ci_pa %#x\n", vqp->sq.comm.wqe_buff_pa,
+			vqp->sq.comm.doorbell_pa, vqp->sq.comm.wqebb_cnt,
+			vqp->sq.comm.wqebb_size, ctrl->sctrl->xmkey->mkey,
+			vqp->sq_vcq->host_pa, vqp->sq_vcq->ci_pa);
 	if (vqp->pre_bk_qp)
 		printf("vqpn 0x%x, pre_bk_qp 0x%x\n", vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum);
 	printf("sq pi  %-10d       sq pre pi  %-10d\n",
@@ -2109,8 +2117,8 @@ static int vrdma_handle_mkey_wait(struct spdk_vrdma_qp *vqp)
 	/* Waiting remote mkey*/
 	clock_gettime(CLOCK_REALTIME, &end_tv);
 	if ((end_tv.tv_sec - vqp->mkey_tv.tv_sec) > VRDMA_RPC_MKEY_TIMEOUT_S) {
-		SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
-					(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
+		//SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
+		//			(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
 		/* qp error state for invalid key */
 		//vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, 0);
 		return -1;
@@ -2145,10 +2153,14 @@ static char *get_vqp_sw_state(struct spdk_vrdma_qp *vqp)
 out:
 	return state_str;
 }
-									
+
+uint8_t g_wqe_cnt = 0;
+struct timespec g_start_tv, g_end_tv;
+
 static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
 {
 	uint16_t pi, pre_pi;
+	struct timespec start_tv, end_tv;
 
 	if (spdk_unlikely(vqp->sw_state == VRDMA_QP_SW_STATE_SUSPENDED)) {
 		return;
@@ -2166,17 +2178,31 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 	
 	if (spdk_unlikely(vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT)) {
 		vrdma_handle_mkey_wait(vqp);
-		SPDK_NOTICELOG("vqp %d, is in mkey wait state, local pi %d\n",
-						vqp->qp_idx, vqp->local_pi);
+		//SPDK_NOTICELOG("vqp %d, is in mkey wait state, local pi %d\n",
+		//				vqp->qp_idx, vqp->local_pi);
 		return;
 	}
-
 	if (pi == pre_pi) {
 		return;
 	}
+	if (g_wqe_cnt == 1) {
+		clock_gettime(CLOCK_REALTIME, &g_end_tv);
+		//SPDK_NOTICELOG("vrdam submit %d wqe latency %"PRIu64" \n",
+		//				(pi - pre_pi), (g_end_tv.tv_nsec - g_start_tv.tv_nsec));
+		vqp->stats.latency_map += (g_end_tv.tv_nsec - g_start_tv.tv_nsec) / 1000;
+		g_wqe_cnt = 0;
+	}
+	
 	vqp->local_pi = pi;
 	vqp->sq.comm.num_to_parse = pi - pre_pi;
+	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_dpa_rx_cb(vqp, VRDMA_QP_SM_OP_OK);
+	//clock_gettime(CLOCK_REALTIME, &end_tv);
+	//SPDK_NOTICELOG("vrdam submit one wqe latency %"PRIu64" \n",
+	//				(end_tv.tv_nsec - start_tv.tv_nsec));
+	g_wqe_cnt++;
+	clock_gettime(CLOCK_REALTIME, &g_start_tv);
+	
 #if 0
 	SPDK_NOTICELOG("VRDMA: vqp %d, post wqe, pi %d, pre_pi %d, num_to_parse %d\n",
 					vqp->qp_idx, pi, pre_pi, vqp->sq.comm.num_to_parse);
@@ -2195,10 +2221,21 @@ static void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp)
 
 void vrdma_qp_process(struct spdk_vrdma_qp *vqp)
 {
+	//struct timespec start_tv, end_tv;
+
 	if (spdk_unlikely(!vqp)) {
 		return;
 	}
+	
+	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_qp_post_wqe(vqp);
+	//clock_gettime(CLOCK_REALTIME, &end_tv);
+	//SPDK_NOTICELOG("vrdam post one wqe latency %"PRIu64" \n",
+	//				(end_tv.tv_nsec - start_tv.tv_nsec));
+	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_qp_poll_cq(vqp);
+	///clock_gettime(CLOCK_REALTIME, &end_tv);
+	//SPDK_NOTICELOG("vrdam poll one cqe latency %"PRIu64" \n",
+	//				(end_tv.tv_nsec - start_tv.tv_nsec));
 }
 

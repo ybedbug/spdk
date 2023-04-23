@@ -90,7 +90,7 @@ static int
 spdk_vrdma_rpc_client_check_timeout(struct spdk_vrdma_rpc_client *client)
 {
 	if (client->timeout < spdk_get_ticks()) {
-		SPDK_WARNLOG("VRDMA SF RPC client command timeout.\n");
+		//SPDK_WARNLOG("VRDMA SF RPC client command timeout.\n");
 		return -ETIMEDOUT;
 	}
 	return 0;

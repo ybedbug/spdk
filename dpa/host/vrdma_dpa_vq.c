@@ -223,7 +223,7 @@ static int vrdma_dpa_db_handler_init(struct vrdma_dpa_ctx *dpa_ctx,
 	if (err) {
 		return err;
 	}
-
+#if 0
 	err = vrdma_event_handler_create(dpa_ctx, rq_dma_q_handler,
 					dpa_handler->rq_dma_q_handler_func,
 					&dpa_handler->rq_dma_q_handler);
@@ -231,6 +231,7 @@ static int vrdma_dpa_db_handler_init(struct vrdma_dpa_ctx *dpa_ctx,
 	if (err) {
 		goto err_rq_dma_q_handler_create;
 	}
+#endif
 	return 0;
 err_rq_dma_q_handler_create:
 	flexio_event_handler_destroy(dpa_handler->db_handler);
@@ -239,7 +240,7 @@ err_rq_dma_q_handler_create:
 
 static void vrdma_dpa_db_handler_uninit(struct vrdma_dpa_handler *dpa_handler)
 {
-	flexio_event_handler_destroy(dpa_handler->rq_dma_q_handler);
+	//flexio_event_handler_destroy(dpa_handler->rq_dma_q_handler);
 	flexio_event_handler_destroy(dpa_handler->db_handler);
 }
 
@@ -469,10 +470,11 @@ _vrdma_dpa_dma_q_cq_create(struct flexio_process *process,
 		return err;
 	}
 
-	log_notice("rx_qsize %d", q_attr->rq_size);
+	//log_notice("rx_qsize %d", q_attr->rq_size);
 	cq_attr.log_cq_depth = log2(q_attr->rq_size);
-	cq_attr.element_type = FLEXIO_CQ_ELEMENT_TYPE_DPA_THREAD;
-	cq_attr.thread = flexio_event_handler_get_thread(event_handler);
+	cq_attr.element_type = FLEXIO_CQ_ELEMENT_TYPE_NON_DPA_CQ;
+	//cq_attr.element_type = FLEXIO_CQ_ELEMENT_TYPE_DPA_THREAD;
+	//cq_attr.thread = flexio_event_handler_get_thread(event_handler);
 	cq_attr.uar_base_addr = emu_dev_ctx->sf_uar->base_addr;
 	cq_attr.uar_id = emu_dev_ctx->sf_uar->page_id;
 	cq_attr.cq_dbr_daddr = rq_dpacq->cq_dbr_daddr;
@@ -490,14 +492,14 @@ _vrdma_dpa_dma_q_cq_create(struct flexio_process *process,
 		goto err_rqcq_mem_alloc;
 	}
 
-	log_notice("tx_qsize %d", q_attr->sq_size);
+	//log_notice("tx_qsize %d", q_attr->sq_size);
 	cq_attr.log_cq_depth = log2(q_attr->sq_size);
 	cq_attr.element_type = FLEXIO_CQ_ELEMENT_TYPE_NON_DPA_CQ;
 	cq_attr.uar_base_addr = emu_dev_ctx->sf_uar->base_addr;
 	cq_attr.uar_id = emu_dev_ctx->sf_uar->page_id;
 	cq_attr.cq_dbr_daddr = sq_dpacq->cq_dbr_daddr;
 	cq_attr.cq_ring_qmem.daddr = sq_dpacq->cq_ring_daddr;
-	log_notice("_vrdma_dpa_dma_q_cq_create");
+	//log_notice("_vrdma_dpa_dma_q_cq_create");
 	err = flexio_cq_create(process, ibv_ctx, &cq_attr, &sq_dpacq->cq);
 	if (err) {
 		log_error("\nFailed to create dma_q sqcq, err(%d)\n", err);
@@ -595,7 +597,7 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 	eh_data->guest_db_cq_ctx.dbr = (uint32_t *)thread->dpa_handler->db_cq.cq_dbr_daddr;
 	eh_data->guest_db_cq_ctx.cqe = eh_data->guest_db_cq_ctx.ring;
 	eh_data->guest_db_cq_ctx.hw_owner_bit = 0;
-	eh_data->guest_db_cq_ctx.log_cq_depth = thread->dpa_handler->db_cq.log_cq_size;
+	eh_data->guest_db_cq_ctx.cq_depth = POW2(thread->dpa_handler->db_cq.log_cq_size);
 
 	/*prepare msix handler qp.rq.cq ctx*/
 	eh_data->msix_cq_ctx.cqn = flexio_cq_get_cq_num(thread->dpa_dma_qp->dma_q_rqcq.cq);
@@ -603,7 +605,7 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 		(struct flexio_dev_cqe64 *)thread->dpa_dma_qp->dma_q_rqcq.cq_ring_daddr;
 	eh_data->msix_cq_ctx.dbr = (uint32_t *)thread->dpa_dma_qp->dma_q_rqcq.cq_dbr_daddr;
 	eh_data->msix_cq_ctx.cqe = eh_data->msix_cq_ctx.ring;
-	eh_data->msix_cq_ctx.log_cq_depth = thread->dpa_dma_qp->dma_q_rqcq.log_cq_size;
+	eh_data->msix_cq_ctx.cq_depth = POW2(thread->dpa_dma_qp->dma_q_rqcq.log_cq_size);
 	eh_data->msix_cq_ctx.hw_owner_bit = 1;
 
 	/*prepare dma_qp address*/
@@ -620,9 +622,9 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 		(struct flexio_dev_cqe64 *)thread->dpa_dma_qp->dma_q_sqcq.cq_ring_daddr;
 	eh_data->dma_sqcq_ctx.dbr = (uint32_t *)thread->dpa_dma_qp->dma_q_sqcq.cq_dbr_daddr;
 	eh_data->dma_sqcq_ctx.cqe = eh_data->dma_sqcq_ctx.ring;
-	eh_data->dma_sqcq_ctx.log_cq_depth = thread->dpa_dma_qp->dma_q_sqcq.log_cq_size;
+	eh_data->dma_sqcq_ctx.cq_depth = POW2(thread->dpa_dma_qp->dma_q_sqcq.log_cq_size);
 	eh_data->dma_sqcq_ctx.hw_owner_bit = 0;
-	log_error("eh_data->dma_sqcq_ctx.log_cq_depth %d", eh_data->dma_sqcq_ctx.log_cq_depth);
+	//log_error("eh_data->dma_sqcq_ctx.cq_depth %d", eh_data->dma_sqcq_ctx.cq_depth);
 	/* Update other pointers */
 	eh_data->dma_qp.state = VRDMA_DPA_VQ_STATE_INIT;
 	eh_data->emu_outbox = flexio_outbox_get_id(dpa_ctx->db_outbox);
@@ -630,7 +632,7 @@ vrdma_dpa_thread_ctx_init(struct vrdma_dpa_thread_ctx *thread,
 
 	eh_data->window_id = flexio_window_get_id(dpa_ctx->window);
 	eh_data->ce_set_threshold = attr->dma_tx_qsize/2;
-	log_notice("ce_set_threshold %d", eh_data->ce_set_threshold);
+	//log_notice("ce_set_threshold %d", eh_data->ce_set_threshold);
 	// eh_data->vq_depth = attr->common.size;
 
 	/*virtnet use host msix to send msix,but vrdma don't need, vrdma get cqn from dma rq.wqe*/
@@ -653,6 +655,7 @@ static void vrdma_dpa_thread_dump_attribute(struct vrdma_dpa_thread_ctx *dpa_thr
 										struct snap_vrdma_vq_create_attr *q_attr,
 										struct vrdma_prov_thread_init_attr *attr)
 {
+	return;
 	log_notice("\n====================dump dma qp parameter======================");
 	log_notice("\ntx_qsize %#x, rx_qsize %#x, tx_elem_size %#x, rx_elem_size %#x\n",
 		   q_attr->sq_size, q_attr->rq_size,
@@ -675,6 +678,7 @@ static void vrdma_dpa_thread_dump_attribute(struct vrdma_dpa_thread_ctx *dpa_thr
 static void vrdma_dpa_vq_dump_attribute(struct vrdma_prov_vqp_init_attr *attr,
 												struct vrdma_dpa_thread_ctx *dpa_thread)
 {
+	return;
 	log_notice("\n====================dump virtq && dma qp info=====================");
 		log_notice("\nemu_vhca_id %#x, sf_vhca_id %#x, vq_idx %#x, vq_qdb_idx %#x\n"
 				"hw_dbcq %#x\n"
@@ -787,6 +791,8 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 	eh_qp_data->free_idx = slot_idx;
 	vqp->dpa_vqp.ctx_idx = slot_idx;
 	dpa_thread->eh_ctx->vqp_ctx[slot_idx].valid = 1;
+	dpa_thread->eh_ctx->vqp_ctx_hdl[attr->emu_db_handler].vqp_ctx_handle = vqp->dpa_vqp.dpa_heap_memory;
+	dpa_thread->eh_ctx->vqp_ctx_hdl[attr->emu_db_handler].valid = 1;
 
 	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
 				     			eh_qp_data, sizeof(*eh_qp_data),
@@ -891,7 +897,7 @@ static int vrdma_dpa_vqp_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdm
 										vqp->qdb_idx, 
 										flexio_cq_get_cq_num(dpa_thread->dpa_handler->db_cq.cq),
 										&vqp->dpa_vqp.emu_db_to_cq_id);
-	if (!vqp->dpa_vqp.devx_emu_db_to_cq_ctx) {
+	if (!vqp->dpa_vqp.devx_emu_db_to_cq_ctx || vqp->dpa_vqp.emu_db_to_cq_id >= MAX_VQP_NUM) {
 		log_error("Failed to map cq_to_db, vhca_id %d, qdb_idx%d, cqn %d, emu_db_to_cq_id %d",
 			   		ctrl->sctrl->sdev->pci->mpci.vhca_id, vqp->qdb_idx,
 			   		flexio_cq_get_cq_num(dpa_thread->dpa_handler->db_cq.cq), 
@@ -1195,12 +1201,13 @@ vrdma_dpa_thread_ctx_get_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *v
 		log_error("Failed to run event handler, err(%d)", rc);
 		goto err_db_handler_run;
 	}
-
+#if 0
 	rc = flexio_event_handler_run(dpa_thread->dpa_handler->rq_dma_q_handler, dpa_thread->heap_memory);
 	if (rc) {
 		log_error("Failed to run event handler, err(%d)", rc);
 		goto err_rq_dma_q_handler_run;
 	}
+#endif
 
 	/* Connect SW_QP to remote DPA qpn */
 	rc = snap_dma_ep_connect_remote_qpn(dpa_thread->sw_dma_qp->dma_q,
@@ -1498,23 +1505,23 @@ static void vrdma_dpa_vq_dbg_stats_query(struct vrdma_dpa_thread_ctx *dpa_thread
 	}
 	log_notice("dpa_qp debug count:");
 
-	log_notice("into rpc num: %d", host_data->ehctx.debug_data.counter[0]);
-	log_notice("out from rpc num: %d", host_data->ehctx.debug_data.counter[1]);
-	log_notice("into db num: %d", host_data->ehctx.debug_data.counter[2]);
-	log_notice("out db num: %d", host_data->ehctx.debug_data.counter[3]);
-	log_notice("qp exceeds budget: %d", host_data->ehctx.debug_data.counter[4]);
-	log_notice("get cqe num: %d", host_data->ehctx.debug_data.counter[5]);
-	log_notice("fetch qp num: %d", host_data->ehctx.debug_data.counter[6]);
-	log_notice("set dma qp ce bit num: %d", host_data->ehctx.debug_data.counter[7]);
+	log_notice("counter[0] into rpc num: %d", host_data->ehctx.debug_data.counter[0]);
+	log_notice("counter[1] out from rpc num: %d", host_data->ehctx.debug_data.counter[1]);
+	log_notice("counter[2] into db num: %d", host_data->ehctx.debug_data.counter[2]);
+	log_notice("counter[3] out db num: %d", host_data->ehctx.debug_data.counter[3]);
+	log_notice("counter[4] qp exceeds budget: %d", host_data->ehctx.debug_data.counter[4]);
+	log_notice("counter[5] get cqe num: %d", host_data->ehctx.debug_data.counter[5]);
+	log_notice("counter[6] fetch qp num: %d", host_data->ehctx.debug_data.counter[6]);
+	log_notice("counter[7] set dma qp ce bit num: %d", host_data->ehctx.debug_data.counter[7]);
 
-	log_notice("total fetched wqes: %d", host_data->ehctx.debug_data.value[0]);
-	log_notice("non dbr cqe num: %d", host_data->ehctx.debug_data.value[1]);
-	log_notice("hw_qp_sq_pi: %d", host_data->ehctx.debug_data.value[2]);
-	log_notice("guest_db_cq_ctx.cqn: %d", host_data->ehctx.debug_data.value[3]);
-	log_notice("guest_db_cq_ctx.ci: %d", host_data->ehctx.debug_data.value[4]);
-	log_notice("total_handled_wqe > 8k: %d", host_data->ehctx.debug_data.value[5]);
-	log_notice("null_db_cqe_cnt > 6: %d", host_data->ehctx.debug_data.value[6]);
-	log_notice("last emu ctx id: %d", host_data->ehctx.debug_data.value[7]);
+	log_notice("value[0] total fetched wqes: %d", host_data->ehctx.debug_data.value[0]);
+	log_notice("value[1] non dbr cqe num: %d", host_data->ehctx.debug_data.value[1]);
+	log_notice("value[2] hw_qp_sq_pi: %d", host_data->ehctx.debug_data.value[2]);
+	log_notice("value[3] guest_db_cq_ctx.cqn: %d", host_data->ehctx.debug_data.value[3]);
+	log_notice("value[4] guest_db_cq_ctx.ci: %d", host_data->ehctx.debug_data.value[4]);
+	log_notice("value[5] total_handled_wqe > 8k: %d", host_data->ehctx.debug_data.value[5]);
+	log_notice("value[6] null_db_cqe_cnt > 6: %d", host_data->ehctx.debug_data.value[6]);
+	log_notice("value[7] last emu ctx id: %d", host_data->ehctx.debug_data.value[7]);
 	
 }
 
