@@ -13,6 +13,7 @@
 #include <libflexio-libc/string.h>
 #include <libflexio-libc/stdio.h>
 #include <libflexio-dev/flexio_dev.h>
+#include <libflexio-dev/src/flexio_dev_dpa_arch.h>
 #include <libflexio-dev/flexio_dev_queue_access.h>
 #include <libflexio-dev/flexio_dev_debug.h>
 #include "../vrdma_dpa_common.h"
@@ -20,7 +21,7 @@
 #include "vrdma_dpa_cq.h"
 
 //#define VRDMA_DPA_DEBUG_DETAIL
-#define VRDMA_DPA_CYCLE
+//#define VRDMA_DPA_CYCLE
 
 #if 0
 static inline int
@@ -381,7 +382,7 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 			vqp_ctx->host_vq_ctx.sq_wqebb_cnt, vqp_ctx->host_vq_ctx.sq_wqebb_size,
 			vqp_ctx->host_vq_ctx.emu_crossing_mkey, vqp_ctx->host_vq_ctx.sf_crossing_mkey);
 #endif
-	fence_rw();
+	//fence_rw();
 	sq_pi_last = vqp_ctx->sq_last_fetch_start;
 	sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 
@@ -389,10 +390,13 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 		vrdma_dpa_sq_process(ehctx, vqp_ctx, sq_pi, sq_pi_last);
 		total_wqe += sq_pi - sq_pi_last;
 		sq_pi_last = sq_pi;
-		flexio_dev_dbr_sq_set_pi((uint32_t *)ehctx->dma_qp.dbr_daddr + 1,
-								ehctx->dma_qp.hw_qp_sq_pi);
-		flexio_dev_qp_sq_ring_db(dtctx, ehctx->dma_qp.hw_qp_sq_pi,
-								ehctx->dma_qp.qp_num);
+		//flexio_dev_dbr_sq_set_pi((uint32_t *)ehctx->dma_qp.dbr_daddr + 1,
+		//						ehctx->dma_qp.hw_qp_sq_pi);
+		//flexio_dev_qp_sq_ring_db(dtctx, ehctx->dma_qp.hw_qp_sq_pi,
+		//						ehctx->dma_qp.qp_num);
+		asm volatile("fence ow,ow" ::: "memory");
+		outbox_write(((struct flexio_os_thread_ctx *)dtctx)->outbox_base, SXD_DB, 
+					OUTBOX_V_SXD_DB(ehctx->dma_qp.hw_qp_sq_pi, ehctx->dma_qp.qp_num));
 		wqe_loop++;
 		
 		if (wqe_loop >= VRDMA_VQP_LOOP_BUDGET ||
@@ -403,11 +407,14 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 			goto out;
 		}
 			
-		fence_rw();
+		fence_r();
 		sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 	}
-	flexio_dev_db_ctx_arm(dtctx, ehctx->guest_db_cq_ctx.cqn,
-			      			vqp_ctx->emu_db_to_cq_id);
+	asm volatile("fence ow,ow" ::: "memory");
+	outbox_write(((struct flexio_os_thread_ctx *)dtctx)->outbox_base, EMU_CAP,
+				OUTBOX_V_EMU_CAP(ehctx->guest_db_cq_ctx.cqn, vqp_ctx->emu_db_to_cq_id));
+	//flexio_dev_db_ctx_arm(dtctx, ehctx->guest_db_cq_ctx.cqn,
+       //	      			vqp_ctx->emu_db_to_cq_id);
 
 #ifdef VRDMA_DPA_DEBUG
 	printf("\n sq_pi %d\n", sq_pi);
@@ -467,22 +474,22 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 	uint16_t null_db_cqe_cnt = 0;
 	uint16_t handled_cqe_num = 0;
 	struct vrdma_dev_cqe64 *db_cqe;
-	uint32_t avg_us;
+	//uint32_t avg_us;
 	uint32_t emu_db_hdl;
-	uint32_t start_cycles, end_cycles;
+	//uint32_t start_cycles, end_cycles;
 #if 0
 	uint16_t vqp_idx;
 	flexio_uintptr_t vqp_daddr;
 #endif
 
-	start_cycles = vrdma_dpa_cpu_cyc_get();
+	//start_cycles = vrdma_dpa_cpu_cyc_get();
 	flexio_dev_get_thread_ctx(&dtctx);
 	ehctx = (struct vrdma_dpa_event_handler_ctx *)thread_arg;
 #ifdef VRDMA_DPA_DEBUG
 	printf("%s: virtq status %d.\n", __func__, ehctx->dma_qp.state);
 #endif
-	vrdma_debug_count_set(ehctx, 2);
-	flexio_dev_outbox_config(dtctx, ehctx->emu_outbox);
+	//vrdma_debug_count_set(ehctx, 2);
+	//flexio_dev_outbox_config(dtctx, ehctx->emu_outbox);
 	flexio_dev_window_mkey_config(dtctx,
 				      ehctx->emu_crossing_mkey);
 	flexio_dev_window_ptr_acquire(dtctx, 0,
@@ -490,13 +497,13 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 
 	while (1)
 	{
-		fence_rw();
+		fence_r();
 		db_cqe = (struct vrdma_dev_cqe64 *)vrdma_dpa_db_cqe_get(&ehctx->guest_db_cq_ctx, 
 												(ehctx->guest_db_cq_ctx.cq_depth - 1));
 		if (db_cqe) {
 			null_db_cqe_cnt = 0;
 			handled_cqe_num++;
-			vrdma_debug_count_set(ehctx, 5);
+			//vrdma_debug_count_set(ehctx, 5);
 			emu_db_hdl = be32_to_cpu(db_cqe->emu_db_handle);
 			vqp_ctx = ehctx->vqp_ctx_hdl[emu_db_hdl].valid ?  \
 						(struct vrdma_dpa_vqp_ctx *)ehctx->vqp_ctx_hdl[emu_db_hdl].vqp_ctx_handle : NULL;
@@ -530,16 +537,17 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 		}
 #else
 		if (handled_cqe_num > VRDMA_DBR_CQE_BUGET || total_handled_wqe > VRDMA_TOTAL_WQE_BUDGET) {
-			vrdma_debug_value_add(ehctx, 5, 1);
+			//vrdma_debug_value_add(ehctx, 5, 1);
 			break;
 		}
 #endif
 		vrdma_dpa_handle_dma_cqe(ehctx);
 		if (null_db_cqe_cnt > VRDMA_CONT_NULL_CQE_BUDGET) {
-			vrdma_debug_value_add(ehctx, 6, 1);
+			//vrdma_debug_value_add(ehctx, 6, 1);
 			break;
 		}
 	}
+#if 0
 	vrdma_debug_value_add(ehctx, 0, total_handled_wqe);
 	vrdma_debug_value_add(ehctx, 1, null_db_cqe_cnt);
 	vrdma_debug_value_set(ehctx, 2, ehctx->dma_qp.hw_qp_sq_pi);
@@ -549,6 +557,7 @@ void vrdma_db_handler(flexio_uintptr_t thread_arg)
 	end_cycles = vrdma_dpa_cpu_cyc_get();
 	avg_us = (end_cycles - start_cycles) / 2000;
 	vrdma_debug_value_add(ehctx, 7, avg_us);
+#endif
 	flexio_dev_reschedule();
 }
 __FLEXIO_ENTRY_POINT_END

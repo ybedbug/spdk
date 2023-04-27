@@ -181,8 +181,8 @@ int vrdma_mqp_add_vqp_to_list(struct vrdma_backend_qp *mqp,
         vqp->bk_qp = mqp;
     LIST_INSERT_HEAD(&mqp->vqp_list, vqp_entry, entry);
     mqp->vqp_cnt++;
-    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
-                   vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
+    //SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
+    //               vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
     return 0;
 }
 
@@ -200,8 +200,8 @@ vrdma_mqp_del_vqp_from_list(struct vrdma_backend_qp *mqp,
     }
     free(vqp_entry);
     mqp->vqp_cnt--;
-    SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
-                   vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
+    //SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
+     //              vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
     return;
 }
 
@@ -429,14 +429,14 @@ int vrdma_create_vq(struct vrdma_ctrl *ctrl,
 
 	if (ctrl->dpa_enabled) {
 		struct vrdma_dpa_thread_ctx *dpa_thread;
-		SPDK_NOTICELOG("===================vrdma_qp.c=================");
-		SPDK_NOTICELOG("vqp %d qdb_idx %d lkey %#x rkey %#x\n",
-				vqp->qp_idx, vqp->qdb_idx, vqp->qp_mr->lkey, vqp->qp_mr->rkey);
+		//SPDK_NOTICELOG("===================vrdma_qp.c=================");
+		//SPDK_NOTICELOG("vqp %d qdb_idx %d lkey %#x rkey %#x\n",
+		//		vqp->qp_idx, vqp->qdb_idx, vqp->qp_mr->lkey, vqp->qp_mr->rkey);
 		dpa_thread = vrdma_prov_thread_ctx_create(ctrl, vqp, &q_attr);
 		if (dpa_thread) {
 			vrdma_prov_vq_map_to_thread(ctrl, vqp, dpa_thread);
-			SPDK_NOTICELOG("vrdma_create_vq end, binded to dpa_thread %d\n",
-							dpa_thread->thread_idx);
+			//SPDK_NOTICELOG("vrdma_create_vq end, binded to dpa_thread %d\n",
+			//				dpa_thread->thread_idx);
 		} else {
 			SPDK_ERRLOG("vrdma_create_vq...fail\n");
 			return -1;
@@ -632,8 +632,8 @@ int vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 	}
 	pthread_spin_lock(&pg->lock);
 	vrdma_sched_vq_nolock(ctrl, vq, pg);
-	SPDK_NOTICELOG("VRDMA queue id %d sched polling group id = %d\n",
-					vq->qp_idx, vq->pg->id);
+	//SPDK_NOTICELOG("VRDMA queue id %d sched polling group id = %d\n",
+	//				vq->qp_idx, vq->pg->id);
 	pthread_spin_unlock(&pg->lock);
 	return 0;
 }
@@ -657,8 +657,8 @@ void vrdma_desched_vq(struct spdk_vrdma_qp *vq)
 	if (!pg)
 		return;
 
-	SPDK_NOTICELOG("VRDMA queue id %d desched polling group id = %d\n",
-					vq->qp_idx, vq->pg->id);
+	//SPDK_NOTICELOG("VRDMA queue id %d desched polling group id = %d\n",
+	//				vq->qp_idx, vq->pg->id);
 	pthread_spin_lock(&pg->lock);
 	vrdma_desched_vq_nolock(vq);
 	pthread_spin_unlock(&pg->lock);
