@@ -190,7 +190,7 @@ static int vrdma_event_handler_create(struct vrdma_dpa_ctx *dpa_ctx,
 		log_error("Failed to create event_handler %s, hart (%d), err(%d)", handler, attr.affinity.id, err);
 		return err;
 	}
-	log_notice("%s use %d hart", handler, attr.affinity.id);
+	//log_notice("%s use %d hart", handler, attr.affinity.id);
 	return 0;
 }
 
@@ -816,8 +816,8 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 		goto free_memory;
 	}
 
-	log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
-				  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
+	//log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
+	//			  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
 
 free_memory:
 	free(eh_qp_data);
@@ -869,8 +869,8 @@ vrdma_dpa_vq_ctx_release(struct spdk_vrdma_qp *vqp)
 		goto free_memory;
 	}
 
-	log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
-				  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
+	//log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
+	//			  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
 
 free_memory:
 	free(eh_qp_data);
@@ -913,8 +913,8 @@ static int vrdma_dpa_vqp_map_to_thread(struct vrdma_ctrl *ctrl, struct spdk_vrdm
 	vqp->dpa_vqp.dpa_thread = dpa_thread;
 	dpa_thread->attached_vqp_num++;
 
-	log_info("vqp dpa addr %lx, succedd to map db_cq, vhca_id %d, qdb_idx  %d, cqn %d, emu ctx id %d",
-			   		vqp->dpa_vqp.dpa_heap_memory, ctrl->sctrl->sdev->pci->mpci.vhca_id, vqp->qdb_idx,
+	log_info("vqpn %d dpa addr %lx, succeed to map db_cq, vhca_id %d, qdb_idx  %d, cqn %d, emu ctx id %d",
+			   		vqp->qp_idx, vqp->dpa_vqp.dpa_heap_memory, ctrl->sctrl->sdev->pci->mpci.vhca_id, vqp->qdb_idx,
 			   		flexio_cq_get_cq_num(dpa_thread->dpa_handler->db_cq.cq), 
 			   		vqp->dpa_vqp.emu_db_to_cq_id);
 	return 0;
@@ -1159,8 +1159,8 @@ vrdma_dpa_thread_ctx_get_create(struct vrdma_ctrl *ctrl, struct spdk_vrdma_qp *v
 	int rc;
 
 	dpa_thread = &g_dpa_threads[vqp->qp_idx % MAX_DPA_THREAD];
-	log_info("vqp index %d, dpa thread(%x) attached vqp num %d\n", 
-			vqp->qp_idx, dpa_thread, dpa_thread->attached_vqp_num);
+	//log_info("vqp index %d, dpa thread(%x) attached vqp num %d\n", 
+	//		vqp->qp_idx, dpa_thread, dpa_thread->attached_vqp_num);
 	if (dpa_thread->attached_vqp_num) {
 		return dpa_thread;
 	}
@@ -1435,10 +1435,10 @@ int vrdma_dpa_msix_create(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
 	}
 	atomic32_inc(&emu_dev_ctx->msix[attr->msix_vector].msix_refcount);
 
-	log_notice("msix %#x, devx_eqn %#x, alias_eqn %#x, alias_cqn %#x",
-		  attr->msix_vector, eqn,
-		  alias_eqn,
-		  emu_dev_ctx->msix[attr->msix_vector].cqn);
+	//log_notice("msix %#x, devx_eqn %#x, alias_eqn %#x, alias_cqn %#x",
+	//	  attr->msix_vector, eqn,
+	//	  alias_eqn,
+	//	  emu_dev_ctx->msix[attr->msix_vector].cqn);
 
 	return 0;
 
@@ -1457,10 +1457,10 @@ void vrdma_dpa_msix_destroy(uint16_t msix_vector,
 	    !atomic32_dec_and_test(&emu_dev_ctx->msix[msix_vector].msix_refcount))
 		return;
 
-	log_notice("Destroy msix %#x, alias_eqn %#x, alias_cqn %#x",
-		  msix_vector,
-		  emu_dev_ctx->msix[msix_vector].eqn,
-		  emu_dev_ctx->msix[msix_vector].cqn);
+	//log_notice("Destroy msix %#x, alias_eqn %#x, alias_cqn %#x",
+	//	  msix_vector,
+	//	  emu_dev_ctx->msix[msix_vector].eqn,
+	//	  emu_dev_ctx->msix[msix_vector].cqn);
 
 	vrdma_dpa_alias_cq_destroy(emu_dev_ctx, msix_vector);
 	mlx_devx_destroy_eq(emu_dev_ctx->msix[msix_vector].alias_eq_obj);

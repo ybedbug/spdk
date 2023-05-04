@@ -806,7 +806,7 @@ static void vrdma_aq_create_qp(struct vrdma_ctrl *ctrl,
 				  aqe->resp.create_qp_resp.err_code);
 		return;
 	}
-	SPDK_NOTICELOG("create vqp pd %p \n", vpd->ibpd);
+	//SPDK_NOTICELOG("create vqp pd %p \n", vpd->ibpd);
 	vqp->vpd = vpd;
 	vqp->sq_vcq = sq_vcq;
 	vqp->rq_vcq = rq_vcq;
@@ -835,8 +835,8 @@ static void vrdma_aq_create_qp(struct vrdma_ctrl *ctrl,
 	LIST_INSERT_HEAD(&ctrl->vdev->vqp_list, vqp, entry);
 	aqe->resp.create_qp_resp.qp_handle = qp_idx;
 	aqe->resp.create_qp_resp.err_code = VRDMA_AQ_MSG_ERR_CODE_SUCCESS;
-	SPDK_NOTICELOG("pd %d qp_idx %d qdb_idx %d successfully\n",
-		aqe->req.create_qp_req.pd_handle, qp_idx, vqp->qdb_idx);
+	//SPDK_NOTICELOG("pd %d qp_idx %d qdb_idx %d successfully\n",
+	//	aqe->req.create_qp_req.pd_handle, qp_idx, vqp->qdb_idx);
 	return;
 destroy_vq:
 	vrdma_destroy_vq(ctrl, vqp);
@@ -850,7 +850,7 @@ static void vrdma_aq_destroy_suspended_qp(struct vrdma_ctrl *ctrl,
 {
 	struct spdk_vrdma_qp *vqp = in_vqp;
 
-	SPDK_NOTICELOG("qp_handle=0x%x\n", aqe->req.destroy_qp_req.qp_handle);
+	//SPDK_NOTICELOG("qp_handle=0x%x\n", aqe->req.destroy_qp_req.qp_handle);
 	if (!vqp)
 		vqp = find_spdk_vrdma_qp_by_idx(ctrl,
 				aqe->req.destroy_qp_req.qp_handle);
@@ -899,8 +899,8 @@ static int vrdma_aq_destroy_qp(struct vrdma_ctrl *ctrl,
 {
 	struct spdk_vrdma_qp *vqp = NULL;
 
-	SPDK_NOTICELOG("qp_handle=0x%x g_vqp_cnt %d vdev %p vqp_cnt %d\n",
-	aqe->req.destroy_qp_req.qp_handle, g_vqp_cnt, ctrl->vdev, ctrl->vdev->vqp_cnt);
+	//SPDK_NOTICELOG("qp_handle=0x%x g_vqp_cnt %d vdev %p vqp_cnt %d\n",
+	//aqe->req.destroy_qp_req.qp_handle, g_vqp_cnt, ctrl->vdev, ctrl->vdev->vqp_cnt);
 	if (!g_vqp_cnt || !ctrl->vdev ||
 		!ctrl->vdev->vqp_cnt) {
 		aqe->resp.destroy_qp_resp.err_code =
@@ -983,9 +983,9 @@ static void vrdma_aq_modify_qp(struct vrdma_ctrl *ctrl,
 {
 	struct spdk_vrdma_qp *vqp = NULL;
 
-	SPDK_NOTICELOG("vqp %d qp_attr_mask = 0x%x\n",
-				aqe->req.modify_qp_req.qp_handle,
-				aqe->req.modify_qp_req.qp_attr_mask);
+	//SPDK_NOTICELOG("vqp %d qp_attr_mask = 0x%x\n",
+	//			aqe->req.modify_qp_req.qp_handle,
+	//			aqe->req.modify_qp_req.qp_attr_mask);
 	if (!g_vqp_cnt || !ctrl->vdev ||
 		!ctrl->vdev->vqp_cnt) {
 		aqe->resp.modify_qp_resp.err_code =
@@ -1057,9 +1057,9 @@ static void vrdma_aq_modify_qp(struct vrdma_ctrl *ctrl,
 		vqp->max_dest_rd_atomic = aqe->req.modify_qp_req.max_dest_rd_atomic;
 	}
 	if (aqe->req.modify_qp_req.qp_attr_mask & IBV_QP_STATE){
-		SPDK_NOTICELOG("vqp %d qp_state=0x%x new qp_state = 0x%x\n",
-				aqe->req.modify_qp_req.qp_handle,
-				vqp->qp_state, aqe->req.modify_qp_req.qp_state);
+		//SPDK_NOTICELOG("vqp %d qp_state=0x%x new qp_state = 0x%x\n",
+		//		aqe->req.modify_qp_req.qp_handle,
+		//		vqp->qp_state, aqe->req.modify_qp_req.qp_state);
 		if (vqp->qp_state != IBV_QPS_ERR &&
 			aqe->req.modify_qp_req.qp_state == IBV_QPS_ERR) {
 			/* Take vqp out of poller-group when it changed to ERR state */
@@ -1127,8 +1127,8 @@ static void vrdma_aq_create_ceq(struct vrdma_ctrl *ctrl,
 	LIST_INSERT_HEAD(&ctrl->vdev->veq_list, veq, entry);
 	aqe->resp.create_ceq_resp.ceq_handle = eq_idx;
 	aqe->resp.create_ceq_resp.err_code = VRDMA_AQ_MSG_ERR_CODE_SUCCESS;
-	SPDK_NOTICELOG("eq_idx %d vector_idx 0x%x successfully\n",
-			eq_idx, veq->vector_idx);
+	//SPDK_NOTICELOG("eq_idx %d vector_idx 0x%x successfully\n",
+	//		eq_idx, veq->vector_idx);
 	return;
 free_veq:
 	free(veq);
@@ -1382,7 +1382,7 @@ int vrdma_parse_admq_entry(struct vrdma_ctrl *ctrl,
 		return -1;
 	}
 
-	SPDK_NOTICELOG("entry opcode: %s\n", get_admq_msg_opcode(aqe->hdr.opcode));
+	//SPDK_NOTICELOG("entry opcode: %s\n", get_admq_msg_opcode(aqe->hdr.opcode));
 	switch (aqe->hdr.opcode) {
 			case VRDMA_ADMIN_OPEN_DEVICE:
 				vrdma_aq_open_dev(ctrl, aqe);

@@ -496,8 +496,8 @@ static bool vrdma_qp_wqe_sm_map_backend(struct spdk_vrdma_qp *vqp,
 #endif
 	vqp->sm_state = VRDMA_QP_STATE_WQE_SUBMIT;
 	clock_gettime(CLOCK_REALTIME, &end_tv);
-	vqp->stats.latency_map =
-			(end_tv.tv_nsec - start_tv.tv_nsec) / vqp->sq.comm.num_to_parse;
+	//vqp->stats.latency_map =
+	//		(end_tv.tv_nsec - start_tv.tv_nsec) / vqp->sq.comm.num_to_parse;
 	return true;
 }
 
@@ -1256,10 +1256,12 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 {
 	struct vrdma_r_vkey *r_vkey, *vkey_tmp;
 	struct timespec end_tv;
+#ifdef WQE_DBG
 	pid_t tid = gettid();
 
 	SPDK_NOTICELOG("<tid %d> vqpn %d mkey is in wait state \n", 
 					tid, vqp->qp_idx);
+#endif
 	pthread_spin_lock(&vrdma_r_vkey_list_lock);
 	LIST_FOREACH_SAFE(r_vkey, &vrdma_r_vkey_list, entry, vkey_tmp) {
 		if (r_vkey->vkey_tbl.gid_ip == vqp->remote_gid_ip) {
@@ -1281,10 +1283,8 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 	/* Waiting remote mkey*/
 	clock_gettime(CLOCK_REALTIME, &end_tv);
 	if ((end_tv.tv_sec - vqp->mkey_tv.tv_sec) > VRDMA_RPC_MKEY_TIMEOUT_S) {
-//#ifdef WQE_DBG
-		SPDK_NOTICELOG("vrdam mkey timeout %"PRIu64" \n",
+		SPDK_ERRLOG("vrdam mkey timeout %"PRIu64" \n",
 					(end_tv.tv_sec - vqp->mkey_tv.tv_sec));
-//#endif
 		/* qp error state for invalid key */
 		vrdma_vqp_mkey_err_cqe(vqp, IBV_WC_REM_INV_REQ_ERR, 0);
 		return false;
@@ -1511,14 +1511,12 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
 									   				enum vrdma_qp_sm_op_status status)
 {
 	struct snap_hw_cq *mcq;
-	struct spdk_vrdma_cq *vcq;
 	struct mlx5_cqe64 *cqe;
 	struct vrdma_cqe *vcqe;
 	uint32_t wqe_idx;
 	int ret = 0;
 	struct timeval tv;
 	uint32_t i;
-	uint16_t cqe_num = 0;
 	struct timespec start_tv, end_tv;
 	struct mqp_sq_meta *sq_meta = NULL;
 	struct vrdma_backend_qp * mqp = NULL;
@@ -1544,7 +1542,6 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
 	}
 	gettimeofday(&tv, NULL);
 	mcq = &mqp->bk_qp.sq_hw_cq;
-	vcq = vqp->sq_vcq;
 #ifdef POLL_PI_DBG
     SPDK_NOTICELOG("vrdam gen sq cqe start\n");
 #endif
@@ -1552,10 +1549,6 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
 		cqe = vrdma_poll_mqp_scq(mcq, SNAP_VRDMA_BACKEND_CQE_SIZE);
 		if (cqe == NULL) {
 			/* if no available cqe, need to write prepared vcqes*/
-#ifdef POLL_PI_DBG
-			SPDK_NOTICELOG("null MCQE: gotton mcqe num %d, ci %d\n",
-							cqe_num, vcq->pici->ci);
-#endif
 			goto null_cqe;
 		}
 		wqe_idx = vrdma_get_wqe_id(mqp, cqe->wqe_counter) & (mqp->bk_qp.hw_qp.sq.wqe_cnt - 1);
@@ -1750,7 +1743,7 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
 	printf("\nsq_wqe_buff_pa %#lx, sq_pi_paddr %#lx,"
 			"sq_wqebb_cnt %#x, sq_wqebb_size %#x,\nemu_crossing_mkey %#x,"
-			"cq_host_pa %#x, cq_ci_pa %#x\n", vqp->sq.comm.wqe_buff_pa,
+			"cq_host_pa %#lx, cq_ci_pa %#lx\n", vqp->sq.comm.wqe_buff_pa,
 			vqp->sq.comm.doorbell_pa, vqp->sq.comm.wqebb_cnt,
 			vqp->sq.comm.wqebb_size, ctrl->sctrl->xmkey->mkey,
 			vqp->sq_vcq->host_pa, vqp->sq_vcq->ci_pa);
@@ -1889,7 +1882,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 	uint16_t first_num = 0, sec_num = 0;
 	uint16_t q_size = vcq->cqe_entry_num;
 	int ret;
-	uint32_t i;
+	uint32_t i = 0;
 	struct vrdma_cqe *vcqe;
 #ifdef WQE_DBG
 	pid_t tid = gettid();
@@ -1911,13 +1904,13 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 	SPDK_NOTICELOG("<tid %d> vrdam vqpn %d write back cqe start: vcqn %d pi %d, pre_pi %d, ci %d, req_id %d, owner %d\n",
 					tid, vqp->qp_idx, vcq->cq_idx, pi, pre_pi, vcq->pici->ci, vcqe->req_id, vcqe->owner);
 #endif
-	if (pi - vcq->pici->ci > vcq->cqe_entry_num) {
+	if (spdk_unlikely(pi - vcq->pici->ci > vcq->cqe_entry_num)) {
 		SPDK_ERRLOG("vcq full, skip write vcqe: vcq pi %d, pre_pi %d, ci %d\n",
 					pi, pre_pi, vcq->pici->ci);
 		return 0;
 	}
 
-	if (pi - vcq->pici->ci > (vcq->cqe_entry_num >> 1)) {
+	if (spdk_unlikely(pi - vcq->pici->ci > (vcq->cqe_entry_num >> 1))) {
 		vrdma_qp_sm_poll_cq_ci_no_cb(vqp);
 	}
 
@@ -2007,16 +2000,15 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 {
 	struct snap_hw_cq *mcq;
-	struct spdk_vrdma_cq *vcq;
 	struct mlx5_cqe64 *cqe;
 	struct vrdma_cqe *vcqe;
 	uint32_t wqe_idx;
 	int ret = 0;
 	uint32_t i;
-	uint16_t cqe_num = 0;
 	struct timespec start_tv, end_tv;
 	struct mqp_sq_meta *sq_meta = NULL;
 	struct spdk_vrdma_qp *comp_vqp;
+	uint64_t tmp;
 #ifdef WQE_DBG
 	pid_t tid = gettid();
 #endif
@@ -2032,10 +2024,6 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 		cqe = vrdma_poll_mqp_scq(mcq, SNAP_VRDMA_BACKEND_CQE_SIZE);
 		if (cqe == NULL) {
 			/* if no available cqe, need to write prepared vcqes*/
-#ifdef POLL_PI_DBG
-			SPDK_NOTICELOG("null MCQE: gotton mcqe num %d, ci %d\n",
-							cqe_num, vcq->pici->ci);
-#endif
 			goto null_cqe;
 		}
 		wqe_idx = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter) & (bk_qp->bk_qp.hw_qp.sq.wqe_cnt - 1);
@@ -2069,6 +2057,12 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
         bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter);
 		vrdma_ring_mcq_db(mcq);
 		clock_gettime(CLOCK_REALTIME, &end_tv);
+		if (spdk_likely(end_tv.tv_sec == start_tv.tv_sec)) {
+			comp_vqp->stats.latency_map += end_tv.tv_nsec - start_tv.tv_nsec;
+		} else {
+			tmp = (end_tv.tv_sec - start_tv.tv_sec) * 1000 * 1000 * 1000 + end_tv.tv_nsec;
+			comp_vqp->stats.latency_map += tmp - start_tv.tv_nsec;
+		}
 		//SPDK_NOTICELOG("test each cqe handle time %lu\n", (end_tv.tv_nsec - start_tv.tv_nsec));
 		return;
 	}
@@ -2155,12 +2149,12 @@ out:
 }
 
 uint8_t g_wqe_cnt = 0;
-struct timespec g_start_tv, g_end_tv;
 
-static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
+static inline void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
 {
 	uint16_t pi, pre_pi;
 	struct timespec start_tv, end_tv;
+	uint64_t tmp;
 
 	if (spdk_unlikely(vqp->sw_state == VRDMA_QP_SW_STATE_SUSPENDED)) {
 		return;
@@ -2168,8 +2162,8 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 
 	if (spdk_unlikely(vqp->sw_state == VRDMA_QP_SW_STATE_FLUSHING)) {
 		vqp->sw_state = VRDMA_QP_SW_STATE_SUSPENDED;
-		SPDK_NOTICELOG("vqpn %d pi %d, state from flushing to %s\n",
-						vqp->qp_idx, vqp->local_pi, get_vqp_sw_state(vqp));
+		//SPDK_NOTICELOG("vqpn %d pi %d, state from flushing to %s\n",
+		//				vqp->qp_idx, vqp->local_pi, get_vqp_sw_state(vqp));
 		return;
 	}
 
@@ -2185,23 +2179,17 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 	if (pi == pre_pi) {
 		return;
 	}
-	if (g_wqe_cnt == 1) {
-		clock_gettime(CLOCK_REALTIME, &g_end_tv);
-		//SPDK_NOTICELOG("vrdam submit %d wqe latency %"PRIu64" \n",
-		//				(pi - pre_pi), (g_end_tv.tv_nsec - g_start_tv.tv_nsec));
-		vqp->stats.latency_map += (g_end_tv.tv_nsec - g_start_tv.tv_nsec) / 1000;
-		g_wqe_cnt = 0;
-	}
-	
+	clock_gettime(CLOCK_REALTIME, &start_tv);
 	vqp->local_pi = pi;
 	vqp->sq.comm.num_to_parse = pi - pre_pi;
-	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_dpa_rx_cb(vqp, VRDMA_QP_SM_OP_OK);
-	//clock_gettime(CLOCK_REALTIME, &end_tv);
-	//SPDK_NOTICELOG("vrdam submit one wqe latency %"PRIu64" \n",
-	//				(end_tv.tv_nsec - start_tv.tv_nsec));
-	g_wqe_cnt++;
-	clock_gettime(CLOCK_REALTIME, &g_start_tv);
+	clock_gettime(CLOCK_REALTIME, &end_tv);
+	if (spdk_likely(end_tv.tv_sec == start_tv.tv_sec)) {
+		vqp->stats.latency_map += end_tv.tv_nsec - start_tv.tv_nsec;
+	} else {
+		tmp = (end_tv.tv_sec - start_tv.tv_sec) * 1000 * 1000 * 1000 + end_tv.tv_nsec;
+		vqp->stats.latency_map += tmp - start_tv.tv_nsec;
+	}
 	
 #if 0
 	SPDK_NOTICELOG("VRDMA: vqp %d, post wqe, pi %d, pre_pi %d, num_to_parse %d\n",
@@ -2209,7 +2197,7 @@ static void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 #endif
 }
 
-static void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp) 
+static inline void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp) 
 {
 	struct vrdma_backend_qp *bk_qp = vqp->bk_qp;
 
@@ -2221,21 +2209,11 @@ static void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp)
 
 void vrdma_qp_process(struct spdk_vrdma_qp *vqp)
 {
-	//struct timespec start_tv, end_tv;
-
 	if (spdk_unlikely(!vqp)) {
 		return;
 	}
 	
-	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_qp_post_wqe(vqp);
-	//clock_gettime(CLOCK_REALTIME, &end_tv);
-	//SPDK_NOTICELOG("vrdam post one wqe latency %"PRIu64" \n",
-	//				(end_tv.tv_nsec - start_tv.tv_nsec));
-	//clock_gettime(CLOCK_REALTIME, &start_tv);
 	vrdma_qp_poll_cq(vqp);
-	///clock_gettime(CLOCK_REALTIME, &end_tv);
-	//SPDK_NOTICELOG("vrdam poll one cqe latency %"PRIu64" \n",
-	//				(end_tv.tv_nsec - start_tv.tv_nsec));
 }
 

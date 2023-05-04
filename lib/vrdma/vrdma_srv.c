@@ -252,12 +252,12 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
     }
     if (vqp->pre_bk_qp->poller_core == VRDMA_INVALID_POLLER_CORE) {
         vqp->pre_bk_qp->poller_core = mqp_idx;
-        SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
-                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, mqp_idx);
+        //SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
+         //              vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, mqp_idx);
     } else {
-        SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
-                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
-                       vqp->pre_bk_qp->poller_core);
+        //SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
+        //               vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
+        //               vqp->pre_bk_qp->poller_core);
     }
     pg = &ctrl->sctrl->pg_ctx.pgs[vqp->pre_bk_qp->poller_core];
 	pg->id = mqp_idx;
@@ -308,8 +308,8 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
 		SPDK_ERRLOG("Failed to find qp for modify in service\n");
 		return -1;
 	}
-	SPDK_NOTICELOG(" vqpn %d old qp_state %d new qp_state %d \n",
-	cmd->req.modify_qp_req.qp_handle, vqp->qp_state, cmd->req.modify_qp_req.qp_state);
+	//SPDK_NOTICELOG(" vqpn %d old qp_state %d new qp_state %d \n",
+	//cmd->req.modify_qp_req.qp_handle, vqp->qp_state, cmd->req.modify_qp_req.qp_state);
 	if (vqp->qp_state == IBV_QPS_INIT &&
 		cmd->req.modify_qp_req.qp_state == IBV_QPS_RTR) {
         ctrl = vrdma_find_ctrl_by_srv_dev(rdev);
@@ -324,6 +324,12 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
         /*vm does not have cm, hard code as mac*/
         memcpy(&local_tgid, ctrl->vdev->vrdma_sf.mac, sizeof(ctrl->vdev->vrdma_sf.mac));
         memcpy(&remote_tgid, ctrl->vdev->vrdma_sf.dest_mac, sizeof(ctrl->vdev->vrdma_sf.dest_mac));
+#endif
+#ifdef MPATH_DBG
+        SPDK_NOTICELOG("%s: sizeof(ctrl->vdev->vrdma_sf.mac)= %lu l_tgid.global.interface_id=%llx, l_tgid.global.subnet_prefix=%llx\n"
+                       "r_tgid.global.interface_id=%llx, r_tgid.global.subnet_prefix=%llx\n", __func__,
+                       sizeof(ctrl->vdev->vrdma_sf.mac), local_tgid.global.interface_id, local_tgid.global.subnet_prefix,
+                       remote_tgid.global.interface_id, remote_tgid.global.subnet_prefix);
 #endif
         tgid_node = vrdma_find_tgid_node(&remote_tgid, &local_tgid);
         if (!tgid_node) {
