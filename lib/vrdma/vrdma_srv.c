@@ -325,10 +325,10 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
         memcpy(&local_tgid, ctrl->vdev->vrdma_sf.mac, sizeof(ctrl->vdev->vrdma_sf.mac));
         memcpy(&remote_tgid, ctrl->vdev->vrdma_sf.dest_mac, sizeof(ctrl->vdev->vrdma_sf.dest_mac));
 #endif
-#ifdef MPATH_DBG
-        SPDK_NOTICELOG("%s: sizeof(ctrl->vdev->vrdma_sf.mac)= %lu l_tgid.global.interface_id=%llx, l_tgid.global.subnet_prefix=%llx\n"
-                       "r_tgid.global.interface_id=%llx, r_tgid.global.subnet_prefix=%llx\n", __func__,
-                       sizeof(ctrl->vdev->vrdma_sf.mac), local_tgid.global.interface_id, local_tgid.global.subnet_prefix,
+#if 0 
+        SPDK_NOTICELOG("l_tgid.global.interface_id=%llx, l_tgid.global.subnet_prefix=%llx\n"
+                       "r_tgid.global.interface_id=%llx, r_tgid.global.subnet_prefix=%llx\n",
+                       local_tgid.global.interface_id, local_tgid.global.subnet_prefix,
                        remote_tgid.global.interface_id, remote_tgid.global.subnet_prefix);
 #endif
         tgid_node = vrdma_find_tgid_node(&remote_tgid, &local_tgid);

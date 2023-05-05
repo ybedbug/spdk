@@ -112,13 +112,19 @@ spdk_jsonrpc_parse_response(struct spdk_jsonrpc_client *client)
             SPDK_ERRLOG("JSON calloc failed");
             return -errno;
         }
-        json = client->recv_buf + offset;
+        r->buf = malloc(buf_len);
+        if (!r->buf) {
+            SPDK_ERRLOG("malloc failed");
+            free(r);
+            return -errno;
+        }
+        memcpy(r->buf, client->recv_buf, buf_len);
+        json = r->buf + offset;
         /* Check to see if we have received a full JSON value. */
         rc = spdk_json_parse(json, buf_len - offset, r->values, values_cnt, &end,
                              SPDK_JSON_PARSE_FLAG_DECODE_IN_PLACE);
         assert(end != NULL);
         offset += (end - json);
-        SPDK_NOTICELOG("offset=%lu\n", offset);
         if (r->values[0].type != SPDK_JSON_VAL_OBJECT_BEGIN) {
             SPDK_ERRLOG("top-level JSON value was not object\n");
             goto err;
@@ -133,7 +139,7 @@ spdk_jsonrpc_parse_response(struct spdk_jsonrpc_client *client)
         STAILQ_INSERT_TAIL(&client->resp_queue, r, link);
         client->resp_cnt++;
     } while (offset < buf_len);
-
+    client->recv_offset = 0;
     return 1;
 
 err:

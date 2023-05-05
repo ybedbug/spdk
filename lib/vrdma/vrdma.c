@@ -34,6 +34,7 @@
 #include "spdk/log.h"
 #include "spdk/vrdma.h"
 #include "spdk/vrdma_snap.h"
+#include "spdk/vrdma_migration.h"
 #include "spdk/vrdma_controller.h"
 #include "spdk/vrdma_emu_mgr.h"
 #include "spdk/vrdma_snap_pci_mgr.h"
@@ -92,6 +93,7 @@ int spdk_vrdma_ctx_start(struct spdk_vrdma_ctx *vrdma_ctx)
 	}
 	ibv_free_device_list(list);
     pthread_spin_init(&vrdma_rpc_lock, PTHREAD_PROCESS_PRIVATE);
+    pthread_spin_init(&vrdma_mig_vqp_list_lock, PTHREAD_PROCESS_PRIVATE);
     spdk_vrdma_init_vkey_lock();
 	/*Create static PF device*/
 	for (dev_count = 0; (uint32_t)dev_count < sctx->vrdma_pfs.num_emulated_pfs;

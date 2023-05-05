@@ -99,6 +99,7 @@ vrdma_usage(void)
 {
 	fprintf(stderr, " -v --pci_mac [pci_number]:[sf_name]:[vrdma_dev_mac], such as [af:00.2]:[mlx5_2]:[11:22:33:44:55:66]\n");
     fprintf(stderr, " -k --indirect_mkey map to crossing_mkey \n");
+    fprintf(stderr, " -a --enable backend qp migration \n");
 }
 
 static int
@@ -167,6 +168,9 @@ vrdma_parse_arg(int ch, char *arg)
     case 'k':
         spdk_vrdma_enable_indirect_mkey_map();
         break;
+    case 'a':
+        vrdma_vqp_migration_enable = 1;
+        break;
 	default:
 		return -EINVAL;
 	}
@@ -183,7 +187,7 @@ int main(int argc, char **argv)
     opts.name = "spdk_vrdma";
     spdk_vrdma_disable_indirect_mkey_map();
     memset(&g_dev_mac, 0, sizeof(struct vrdma_dev_mac));
-    if ((rc = spdk_app_parse_args(argc, argv, &opts, "v:k", NULL,
+    if ((rc = spdk_app_parse_args(argc, argv, &opts, "v:ka", NULL,
     	vrdma_parse_arg, vrdma_usage)) != SPDK_APP_PARSE_ARGS_SUCCESS) {
 	    fprintf(stderr, "Unable to parse the application arguments.\n");
         exit(rc);

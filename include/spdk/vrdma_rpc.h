@@ -120,7 +120,8 @@ struct spdk_vrdma_rpc_qp_msg {
     uint64_t sf_mac;
     uint32_t bk_qpn;
     uint32_t qp_state;
-    uint8_t  mqp_idx;
+    uint32_t mqp_idx;
+    uint32_t next_rcv_psn;
     union ibv_gid local_tgid;
     union ibv_gid remote_tgid;
     union ibv_gid local_mgid;

@@ -43,7 +43,7 @@
 #include "spdk/vrdma_srv.h"
 #include "spdk/vrdma_admq.h"
 #include "spdk/vrdma_mr.h"
-
+#include "spdk/vrdma_controller.h"
 #include "snap_dma.h"
 #include "snap_vrdma_ctrl.h"
 
@@ -463,13 +463,20 @@ static bool vrdma_qp_wqe_sm_parse(struct spdk_vrdma_qp *vqp,
 	return true;
 }
 
+
 static inline struct vrdma_backend_qp *vrdma_vq_get_mqp(struct spdk_vrdma_qp *vqp)
 {
-	/* TODO: currently, only one-to-one map */
 #ifdef WQE_DBG
-	SPDK_NOTICELOG("vqp=0x%x get mqp=0x%p\n", vqp->qp_idx, vqp->bk_qp);
+    SPDK_NOTICELOG("vqp=0x%x get mqp=0x%p\n", vqp->qp_idx, vqp->bk_qp);
 #endif
-	return vqp->bk_qp;
+    if (!is_vrdma_vqp_migration_enable())
+        return vqp->bk_qp;
+    vrdma_mig_handle_sm(vqp);
+    if (vqp->mig_ctx.mig_state != MIG_IDLE) {
+        return NULL;
+    } else {
+        return vqp->bk_qp;
+    }
 }
 
 static bool vrdma_qp_wqe_sm_map_backend(struct spdk_vrdma_qp *vqp,
@@ -791,6 +798,9 @@ static inline bool vrdma_set_data_seg(struct vrdma_send_wqe *wqe, void *seg,
 				mlx5dv_set_data_seg(dseg, sge.buf_length, sge.lkey, (intptr_t)sge_addr);
 				++dseg;
 				ds += sizeof(*dseg) / 16;
+                if (is_vrdma_vqp_migration_enable()) {
+                    vqp->mig_ctx.mig_wqe_len += sge.buf_length;
+                }
 			}
 		}
 	}
@@ -1053,8 +1063,8 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
         mqp_pi &= (backend_qp->hw_qp.sq.wqe_cnt - 1);
         sq_meta = &mqp->sq_meta_buf[mqp_pi];
         sq_meta->req_id = wqe->meta.req_id;
+        sq_meta->twqe_idx = vqp->sq.comm.pre_pi + i;
         sq_meta->vqp = vqp;
-		
 		switch (opcode) {
 			case MLX5_OPCODE_RDMA_READ:
 			case MLX5_OPCODE_RDMA_WRITE:
@@ -1076,6 +1086,21 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 				vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
 				return false;
 		}
+        if (is_vrdma_vqp_migration_enable()) {
+            vqp->sq.meta_buff[(vqp->sq.comm.pre_pi + i) % q_size].mqp_wqe_idx = backend_qp->hw_qp.sq.pi;
+            sq_meta->first_psn = mqp->mig_ctx.msg_1st_psn;
+            sq_meta->last_psn  = sq_meta->first_psn +
+                                 (vqp->mig_ctx.mig_wqe_len/mqp->mig_ctx.mig_pmtu - 1);
+#ifdef MPATH_DBG
+            SPDK_NOTICELOG("vrdam vqp=%u, twqe_idx=%u, mqp_wqe_idx=%u first_psn=%u, last_psn=%u\n",
+                            vqp->qp_idx, sq_meta->twqe_idx, backend_qp->hw_qp.sq.pi,
+                            sq_meta->first_psn, sq_meta->last_psn);
+#endif
+            mqp->mig_ctx.msg_1st_psn = (sq_meta->last_psn + 1) & PSN_MASK;//psn 24 bits
+            if (i == (num_to_parse - 1)) {
+                wqe->meta.send_flags |= IBV_SEND_SIGNALED;
+            }
+        }
 		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {	
 			vqp->sq.comm.pre_pi += i; 
 			vrdma_tx_complete(backend_qp);
@@ -1581,7 +1606,7 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
             vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
             return true;
         }
-        mqp->bk_qp.sq_ci = vrdma_get_wqe_id(mqp, cqe->wqe_counter);
+        mqp->bk_qp.sq_ci = vrdma_get_wqe_id(mqp, cqe->wqe_counter) + 1;
 		vrdma_ring_mcq_db(mcq);
 		//vqp->sm_state = VRDMA_QP_STATE_GEN_COMP;
 		clock_gettime(CLOCK_REALTIME, &end_tv);
@@ -2033,6 +2058,20 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
             SPDK_NOTICELOG("null vqp，vqp has been destroyed\n");
             continue;
 		}
+        if (mlx5dv_get_cqe_opcode(cqe) == MLX5_CQE_REQ_ERR) {
+            bk_qp->qp_state = IBV_QPS_ERR;
+            if (is_vrdma_vqp_migration_enable()) {
+                struct mlx5_err_cqe *ecqe = (struct mlx5_err_cqe *)cqe;
+                if (ecqe->syndrome == MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR ||
+                    ecqe->syndrome == MLX5_CQE_SYNDROME_WR_FLUSH_ERR) {
+                    comp_vqp->mig_ctx.mig_repost = 1;
+                    comp_vqp->mig_ctx.mig_state = MIG_START;
+                    comp_vqp->sq_ci = sq_meta->twqe_idx + 1;
+                    goto null_cqe;
+                }
+            }
+        }
+		comp_vqp->sq_ci = sq_meta->twqe_idx;
 		//cqe_idx = vcq->pi & (vcq->cqe_entry_num - 1);
 		vcqe = (struct vrdma_cqe *)comp_vqp->sq.local_cq_buff;
 		vcqe->imm_data = cqe->imm_inval_pkey;
@@ -2054,7 +2093,7 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 		if (spdk_unlikely(ret)) {
             SPDK_ERRLOG("failed to write cq CQE entry, ret %d\n", ret);
         }
-        bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter);
+        bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter) + 1;
 		vrdma_ring_mcq_db(mcq);
 		clock_gettime(CLOCK_REALTIME, &end_tv);
 		if (spdk_likely(end_tv.tv_sec == start_tv.tv_sec)) {

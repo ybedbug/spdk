@@ -49,6 +49,7 @@
 #include "spdk/vrdma_admq.h"
 #include "spdk/vrdma_srv.h"
 #include "spdk/vrdma_mr.h"
+#include "spdk/vrdma_migration.h"
 #include "vrdma_providers.h"
 #include "spdk/vrdma_io_mgr.h"
 
@@ -177,7 +178,6 @@ int vrdma_ctrl_progress_all_io(void *arg)
 {
     struct vrdma_ctrl *ctrl = arg;
 	int i;
-	int n = 0;
 
 	for (i = 0; i < ctrl->sctrl->pg_ctx.npgs; i++) {
 		vrdma_ctrl_progress_io(arg, i);
@@ -188,12 +188,21 @@ int vrdma_ctrl_progress_all_io(void *arg)
     //return snap_vrdma_ctrl_io_progress(ctrl->sctrl) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
+int vrdma_ctrl_progress_migration(void *arg)
+{
+    struct vrdma_ctrl *ctrl = arg;
+
+    vrdma_migration_progress(ctrl);
+    return SPDK_POLLER_BUSY;
+}
+
 int vrdma_ctrl_progress_io(void *arg, int thread_id)
 {
     struct vrdma_ctrl *ctrl = arg;
     struct snap_pg *pg = &ctrl->sctrl->pg_ctx.pgs[thread_id];
     struct spdk_vrdma_qp *vq;
 	struct snap_pg_q_entry *pg_q;
+    struct vrdma_tgid_node *tgid_node;
 
 	pthread_spin_lock(&pg->lock);
   	TAILQ_FOREACH(pg_q, &pg->q_list, entry) {
@@ -202,6 +211,11 @@ int vrdma_ctrl_progress_io(void *arg, int thread_id)
 		vrdma_qp_process(vq);
 	}
 	pthread_spin_unlock(&pg->lock);
+    if (is_vrdma_vqp_migration_enable() && (!LIST_EMPTY(&vrdma_tgid_list))) {
+        LIST_FOREACH(tgid_node, &vrdma_tgid_list, entry) {
+            vrdma_mig_mqp_depth_sampling(tgid_node->src_udp[thread_id].mqp);
+        }
+    }
 	return SPDK_POLLER_BUSY;
 
     //return snap_vrdma_ctrl_io_progress_thread(ctrl->sctrl, thread_id) ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;

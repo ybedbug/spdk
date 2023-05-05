@@ -104,6 +104,7 @@ int vrdma_ctrl_adminq_progress(void *ctrl);
 void vrdma_ctrl_progress(void *ctrl);
 int vrdma_ctrl_progress_all_io(void *ctrl);
 int vrdma_ctrl_progress_io(void *arg, int thread_id);
+int vrdma_ctrl_progress_migration(void *ctrl);
 void vrdma_ctrl_suspend(void *ctrl);
 bool vrdma_ctrl_is_suspended(void *ctrl);
 
