@@ -347,18 +347,10 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
         SPDK_ERRLOG("Failed to decode result for qp_msg\n");
         goto free_attr;
     }
-    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x\n"
-                   "qp_state=0x%x mqp_idx =0x%x next_rcv_psn=%u \n"
-                   "local_tgid.prefix=0x%llx local_tgid.ip=0x%llx \n"
-                   "remote_tgid.prefix=0x%llx remote_tgid.ip=0x%llx \n"
-                   "local_mgid.prefix=0x%llx local_mgid.ip=0x%llx\n"
-                   "remote_mgid.prefix=0x%llx remote_mgid.ip=0x%llx\n",
+    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x "
+                   "qp_state=0x%x mqp_idx =0x%x next_rcv_psn=%u \n",
                    attr->emu_manager, attr->request_id, attr->sf_mac, attr->bk_qpn,
-                   attr->qp_state, attr->mqp_idx, attr->next_rcv_psn,
-                   attr->local_tgid.global.subnet_prefix, attr->local_tgid.global.interface_id,
-                   attr->remote_tgid.global.subnet_prefix, attr->remote_tgid.global.interface_id,
-                   attr->local_mgid.global.subnet_prefix, attr->local_mgid.global.interface_id,
-                   attr->remote_mgid.global.subnet_prefix, attr->remote_mgid.global.interface_id);
+                   attr->qp_state, attr->mqp_idx, attr->next_rcv_psn);
 
     ctx = spdk_emu_ctx_find_by_gid_ip(attr->emu_manager, attr->remote_mgid.global.interface_id);
     if (ctx) {
@@ -408,7 +400,6 @@ spdk_vrdma_rpc_client_configuration(const char *addr)
 {
     struct spdk_vrdma_rpc_client *client = &g_vrdma_rpc.client;
     if (client->client_conn) {
-		SPDK_NOTICELOG("RPC client connect to '%s' is already existed.\n", addr);
 		return 0;
 	}
     client->client_conn = spdk_jsonrpc_client_connect(addr, AF_UNSPEC);
@@ -500,17 +491,10 @@ spdk_vrdma_rpc_client_send_qp_msg(
 		goto out;
 	}
 #ifdef MPATH_DBG
-    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x\n"
-                   "qp_state=0x%x mqp_idx =0x%x local_tgid.prefix=0x%llx local_tgid.ip=0x%llx \n"
-                   "remote_tgid.prefix=0x%llx remote_tgid.ip=0x%llx \n"
-                   "local_mgid.prefix=0x%llx local_mgid.ip=0x%llx\n"
-                   "remote_mgid.prefix=0x%llx remote_mgid.ip=0x%llx\n",
+    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x "
+                   "qp_state=0x%x mqp_idx =0x%x\n",
                    msg->emu_manager, msg->request_id, msg->sf_mac, msg->bk_qpn,
-                   msg->qp_state, msg->mqp_idx, msg->local_tgid.global.subnet_prefix,
-                   msg->local_tgid.global.interface_id, msg->remote_tgid.global.subnet_prefix,
-                   msg->remote_tgid.global.interface_id, msg->local_mgid.global.subnet_prefix,
-                   msg->local_mgid.global.interface_id, msg->remote_mgid.global.subnet_prefix,
-                   msg->remote_mgid.global.interface_id);
+                   msg->qp_state, msg->mqp_idx);
 #endif
     return 0;
 out:
@@ -634,17 +618,10 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
         goto invalid;
     }
 #ifdef MPATH_DBG
-    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x\n"
-                   "qp_state=0x%x mqp_idx =0x%x local_tgid.prefix=0x%llx local_tgid.ip=0x%llx \n"
-                   "remote_tgid.prefix=0x%llx remote_tgid.ip=0x%llx \n"
-                   "local_mgid.prefix=0x%llx local_mgid.ip=0x%llx\n"
-                   "remote_mgid.prefix=0x%llx remote_mgid.ip=0x%llx\n",
+    SPDK_NOTICELOG("emu_manager %s request_id=0x%x sf_mac=0x%lx bk_qpn =0x%x "
+                   "qp_state=0x%x mqp_idx =0x%x\n",
                    attr->emu_manager, attr->request_id, attr->sf_mac, attr->bk_qpn,
-                   attr->qp_state, attr->mqp_idx, attr->local_tgid.global.subnet_prefix,
-                   attr->local_tgid.global.interface_id, attr->remote_tgid.global.subnet_prefix,
-                   attr->remote_tgid.global.interface_id, attr->local_mgid.global.subnet_prefix,
-                   attr->local_mgid.global.interface_id, attr->remote_mgid.global.subnet_prefix,
-                   attr->remote_mgid.global.interface_id);
+                   attr->qp_state, attr->mqp_idx);
 #endif
     /* Find device data by remote_gid_ip (remote SF IP)*/
     ctx = spdk_emu_ctx_find_by_gid_ip(attr->emu_manager, attr->remote_mgid.global.interface_id);

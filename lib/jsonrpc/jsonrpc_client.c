@@ -105,7 +105,6 @@ spdk_jsonrpc_parse_response(struct spdk_jsonrpc_client *client)
     buf_len = client->recv_offset;
     offset = 0;
     values_cnt = rc;
-    SPDK_NOTICELOG("buf_len=%lu\n", buf_len);
     do {
         r = calloc(1, sizeof(*r) + sizeof(struct spdk_json_val) * (values_cnt + 1));
         if (!r) {
@@ -135,7 +134,6 @@ spdk_jsonrpc_parse_response(struct spdk_jsonrpc_client *client)
             goto err;
         }
         r->ready = 1;
-        SPDK_NOTICELOG("insert resp=%p\n", r);
         STAILQ_INSERT_TAIL(&client->resp_queue, r, link);
         client->resp_cnt++;
     } while (offset < buf_len);

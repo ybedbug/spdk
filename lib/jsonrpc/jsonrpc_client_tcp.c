@@ -134,7 +134,6 @@ _spdk_jsonrpc_client_recv(struct spdk_jsonrpc_client *client)
 		}
 	}
 
-    SPDK_NOTICELOG("recv_buf=%p, recv_offset=%lu\n", client->recv_buf, client->recv_offset);
 	rc = recv(client->sockfd, client->recv_buf + client->recv_offset,
 		  client->recv_buf_size - client->recv_offset - 1, 0);
 	if (rc < 0) {
