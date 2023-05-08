@@ -424,6 +424,10 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 
 out:
 	vqp_ctx->sq_last_fetch_start = sq_pi;
+	if (vqp_ctx->mctx.field & (1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT)) {
+		vqp_ctx->sq_last_fetch_start = vqp_ctx->mctx.repost_pi;
+		vqp_ctx->mctx.field &= ~(1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT)
+	}
 	return total_wqe;
 }
 

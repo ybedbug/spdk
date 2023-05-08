@@ -167,4 +167,6 @@ int vrdma_dpa_msix_create(struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx,
 
 void vrdma_dpa_msix_destroy(uint16_t msix_vector,
 			      struct vrdma_dpa_emu_dev_ctx *emu_dev_ctx);
+int vrdma_dpa_set_vq_repost_pi(void *vqp, uint16_t vq_repost_pi);
+
 #endif
