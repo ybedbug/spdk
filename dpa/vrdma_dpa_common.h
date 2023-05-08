@@ -219,6 +219,16 @@ struct vrdma_dpa_vq_data {
 	uint8_t err;
 } __attribute__((__packed__, aligned(8)));
 
+enum dpa_vqp_modify_field_bit{
+	VRDMA_DPA_VQP_MOD_REPOST_PI_BIT = 1,
+	VRDMA_DPA_VQP_MOD_MAX,
+};
+
+struct vrdma_dpa_vqp_modify_ctx {
+	uint16_t field;
+	uint16_t repost_pi;
+};
+
 struct vrdma_dpa_vqp_ctx {
 	uint32_t emu_db_to_cq_id;
 	uint32_t vq_index;
@@ -229,6 +239,7 @@ struct vrdma_dpa_vqp_ctx {
 	enum vrdma_dpa_vq_state state;
 	uint16_t free_idx;
 	flexio_uintptr_t eh_ctx_daddr;
+	struct vrdma_dpa_vqp_modify_ctx mctx;
 };
 
 struct vrdma_dpa_msix_send {

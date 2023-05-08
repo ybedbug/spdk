@@ -233,7 +233,7 @@ static int vrdma_dpa_db_handler_init(struct vrdma_dpa_ctx *dpa_ctx,
 	}
 #endif
 	return 0;
-err_rq_dma_q_handler_create:
+//err_rq_dma_q_handler_create:
 	flexio_event_handler_destroy(dpa_handler->db_handler);
 	return err;
 }
@@ -1529,6 +1529,42 @@ static uint32_t vrdma_dpa_emu_db_to_cq_ctx_get_id(struct spdk_vrdma_qp *vqp)
 {
 	return vqp->dpa_vqp.emu_db_to_cq_id;
 }
+
+int vrdma_dpa_set_vq_repost_pi(void *vqp_hdl, uint16_t vq_repost_pi)
+{
+	struct vrdma_dpa_vqp_modify_ctx *modify_data;
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+	struct spdk_vrdma_qp *vqp = (struct spdk_vrdma_qp *)vqp_hdl;
+	flexio_uintptr_t daddr;
+	flexio_status err;
+	int ret = 0;
+
+	dpa_thread = vqp->dpa_vqp.dpa_thread;
+	/*prepare host and arm wr&pi address which used for rdma write*/
+	modify_data = calloc(1, sizeof(*modify_data));
+	if (!modify_data) {
+		log_error("mctx data malloc failed, no more memory");
+		ret = -1;
+		goto out;
+	}
+	modify_data->repost_pi = vq_repost_pi;
+	modify_data->field |= 1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT;
+	daddr = vqp->dpa_vqp.dpa_heap_memory + offsetof(struct vrdma_dpa_vqp_ctx, mctx);
+	
+	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
+				     			modify_data, sizeof(*modify_data), daddr);
+	if (err) {
+		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
+		ret = -1;
+		goto free_memory;
+	}
+
+free_memory:
+	free(modify_data);
+out:
+	return ret;
+}
+
 
 struct vrdma_vq_ops vrdma_dpa_vq_ops = {
 	.ctx_get_create = vrdma_dpa_thread_ctx_get_create,
