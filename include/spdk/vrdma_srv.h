@@ -254,7 +254,7 @@ struct vrdma_tgid_key {
 struct vrdma_tgid_node {
     LIST_ENTRY(vrdma_tgid_node)     entry;
     struct vrdma_tgid_key           key;
-    struct spdk_vrdma_dev           *local_vdev;
+    struct vrdma_ctrl               *ctrl;
     struct ibv_pd                   *pd;
     uint8_t                         max_mqp_cnt;
     uint8_t                         curr_mqp_cnt;

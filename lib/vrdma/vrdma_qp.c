@@ -60,56 +60,51 @@ vrdma_find_tgid_node(union ibv_gid *remote_tgid, union ibv_gid *local_tgid)
     return tgid_node;
 }
 
-struct vrdma_tgid_node *
-vrdma_find_tgid_node_by_mqp(uint8_t mqp_idx, struct vrdma_backend_qp *mqp)
-{
-    struct vrdma_udp_sport_node *pnode = SPDK_CONTAINEROF(mqp, struct vrdma_udp_sport_node, mqp);
-    uintptr_t tgid_src_udp_addr = (uintptr_t)pnode - sizeof(struct vrdma_udp_sport_node)*mqp_idx;
-
-    return SPDK_CONTAINEROF(tgid_src_udp_addr, struct vrdma_tgid_node, src_udp);
-}
-
 static void
-vrdma_dump_mqp(struct vrdma_tgid_node *tgid_node, int8_t mqp_idx)
+vrdma_dump_mqp(struct vrdma_tgid_node *tgid_node, int8_t mqp_idx, int32_t meta_start)
 {
     if (!tgid_node) return;
     struct vrdma_backend_qp *mqp = NULL;
     struct vrdma_vqp *vqp_entry = NULL;
     struct mqp_sq_meta *sq_meta = NULL;
-    uint32_t i;
+    int32_t i;
 
     mqp = tgid_node->src_udp[mqp_idx].mqp;
     if (mqp) {
-        printf("-------------------mqp[%u]=%p-------------------\n", mqp_idx, mqp);
+        printf("--------------mqp[%u]=%p--------------\n", mqp_idx, mqp);
         printf("\tpoller_core=%u udp_sport=0x%x qpn=0x%x qp_state=%u\n",
                mqp->poller_core, tgid_node->src_udp[mqp_idx].udp_src_port,
                mqp->bk_qp.qpnum, mqp->qp_state);
         printf("\tvqp_cnt=%u vqp list:\n", mqp->vqp_cnt);
+        pthread_spin_lock(&mqp->vqp_list_lock);
         LIST_FOREACH(vqp_entry, &mqp->vqp_list, entry) {
             printf("\t\t%u\n", vqp_entry->qpn);
         }
+        pthread_spin_unlock(&mqp->vqp_list_lock);
         printf("\tmqp.sq_pi=%u mqp.sq_ci=%u mqp.avg_depth=%u\n",
                mqp->bk_qp.hw_qp.sq.pi, mqp->bk_qp.sq_ci, mqp->avg_depth);
         for (i = 0; i < MQP_DEPTH_SAMPLE_NUM; i++) {
             printf("\tmqp->sample_depth[%u]=%u\n", i, mqp->sample_depth[i]);
         }
         if (is_vrdma_vqp_migration_enable()) {
-            printf("\tpmtu=%u, msg_1st_psn=%u, repost_pi=%u, repost_offset=%u, "
-                   "rnxt_rcv_psn=%u, mig_lnxt_rcv_psn=%u\n",
+            printf("\tpmtu=%u, msg_1st_psn=%u, rnxt_rcv_psn=%u, mig_lnxt_rcv_psn=%u\n",
                    mqp->mig_ctx.mig_pmtu, mqp->mig_ctx.msg_1st_psn,
-                   mqp->mig_ctx.mig_repost_pi, mqp->mig_ctx.mig_repost_offset,
                    mqp->mig_ctx.mig_rnxt_rcv_psn, mqp->mig_ctx.mig_lnxt_rcv_psn);
-            for (i = 0; i < mqp->bk_qp.hw_qp.sq.pi; i++) {
+            if (meta_start == -1)
+                return;
+            for (i = meta_start; i < mqp->bk_qp.hw_qp.sq.pi; i++) {
                 sq_meta = &mqp->sq_meta_buf[i%mqp->bk_qp.hw_qp.sq.wqe_cnt];
-                printf("\tsq_meta[%u]: vqp=%u, twqe_idx=%u, first_psn=%u, last_psn=%u\n",
-                       sq_meta->vqp->qp_idx, sq_meta->twqe_idx, sq_meta->first_psn, sq_meta->last_psn);
+                printf("\tsq_meta=%p, sq_meta[%u]: vqp=%u, twqe_idx=%u, first_psn=%u, last_psn=%u\n",
+                       sq_meta, i, sq_meta->vqp->qp_idx, sq_meta->twqe_idx, sq_meta->first_psn, sq_meta->last_psn);
             }
         }
     }
 }
 
 void
-vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node, int32_t specified_mqp)
+vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node,
+                     int32_t specified_mqp,
+                     int32_t meta_start)
 {
     uint32_t mqp_idx;
 
@@ -125,10 +120,10 @@ vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node, int32_t specified_mqp)
            tgid_node->max_mqp_cnt, tgid_node->curr_mqp_cnt);
     if (specified_mqp == -1) {
         for (mqp_idx = 0; mqp_idx < tgid_node->curr_mqp_cnt; mqp_idx++) {
-            vrdma_dump_mqp(tgid_node, mqp_idx);
+            vrdma_dump_mqp(tgid_node, mqp_idx, meta_start);
         }
     } else {
-        vrdma_dump_mqp(tgid_node, specified_mqp);
+        vrdma_dump_mqp(tgid_node, specified_mqp, meta_start);
     }
     printf("========= dump tgid node end =========\n");
 }
@@ -152,8 +147,7 @@ vrdma_destroy_tgid_list(void)
 struct vrdma_tgid_node *
 vrdma_create_tgid_node(union ibv_gid *remote_tgid,
                        union ibv_gid *local_tgid,
-                       struct spdk_vrdma_dev *local_vdev,
-                       struct ibv_pd *local_pd,
+                       struct vrdma_ctrl *ctrl,
                        uint16_t udp_sport_start,
                        uint32_t max_mqp_cnt)
 {
@@ -168,7 +162,7 @@ vrdma_create_tgid_node(union ibv_gid *remote_tgid,
     SPDK_NOTICELOG("created new tgid_node, max_mqp_cnt=%u\n", max_mqp_cnt);
     memcpy(&tgid_node->key.local_tgid, local_tgid, sizeof(union ibv_gid));
     memcpy(&tgid_node->key.remote_tgid, remote_tgid, sizeof(union ibv_gid));
-    tgid_node->local_vdev = local_vdev;
+    tgid_node->ctrl = ctrl;
     tgid_node->max_mqp_cnt = max_mqp_cnt;
     tgid_node->src_udp = calloc(max_mqp_cnt, sizeof(struct vrdma_udp_sport_node));
     if (!tgid_node->src_udp) {
@@ -179,7 +173,7 @@ vrdma_create_tgid_node(union ibv_gid *remote_tgid,
     for(i = 0; i < max_mqp_cnt; i++) {
         tgid_node->src_udp[i].udp_src_port = udp_sport_start + i;
     }
-    tgid_node->pd = local_pd;
+    tgid_node->pd = ctrl->vdev->vrdma_sf.sf_pd;
     LIST_INSERT_HEAD(&vrdma_tgid_list, tgid_node, entry);
     return tgid_node;
 }
@@ -204,8 +198,8 @@ vrdma_find_mqp_by_depth(struct vrdma_tgid_node *tgid_node, uint8_t *mqp_idx)
 
     for (i = 0; i < tgid_node->max_mqp_cnt; i++) {
         tmp_mqp = tgid_node->src_udp[i].mqp;
-        if (!mqp || (tmp_mqp && tmp_mqp->qp_state != IBV_QPS_ERR &&
-                     tmp_mqp->avg_depth < mqp->avg_depth)) {
+        if (tmp_mqp && tmp_mqp->qp_state != IBV_QPS_ERR &&
+                (!mqp || tmp_mqp->avg_depth < mqp->avg_depth)) {
             mqp = tgid_node->src_udp[i].mqp;
             *mqp_idx = i;
         }
@@ -269,7 +263,9 @@ int vrdma_mqp_add_vqp_to_list(struct vrdma_backend_qp *mqp,
     vqp->pre_bk_qp = mqp;
     if (mqp->qp_state == IBV_QPS_RTS)
         vqp->bk_qp = mqp;
+    pthread_spin_lock(&mqp->vqp_list_lock);
     LIST_INSERT_HEAD(&mqp->vqp_list, vqp_entry, entry);
+    pthread_spin_unlock(&mqp->vqp_list_lock);
     mqp->vqp_cnt++;
     //SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
     //               vqp_idx, mqp->bk_qp.qpnum, mqp->vqp_cnt);
@@ -283,11 +279,15 @@ vrdma_mqp_del_vqp_from_list(struct vrdma_backend_qp *mqp,
     struct vrdma_vqp *vqp_entry = NULL, *tmp;
 
 	if(!mqp) return;
+    pthread_spin_lock(&mqp->vqp_list_lock);
     LIST_FOREACH_SAFE(vqp_entry, &mqp->vqp_list, entry, tmp) {
         if (vqp_entry->qpn == vqp_idx) {
+            vqp_entry->vqp->bk_qp = NULL;
+            vqp_entry->vqp->pre_bk_qp = NULL;
             LIST_REMOVE(vqp_entry, entry);
         }
     }
+    pthread_spin_unlock(&mqp->vqp_list_lock);
     free(vqp_entry);
     mqp->vqp_cnt--;
     //SPDK_NOTICELOG("vqp=0x%x, mqp=0x%x, mqp->vqp_cnt=%u\n",
@@ -300,11 +300,14 @@ vrdma_mqp_find_vqp(struct vrdma_backend_qp *mqp,
                    uint32_t vqp_idx)
 {
     struct vrdma_vqp *vqp_entry = NULL;
+    pthread_spin_lock(&mqp->vqp_list_lock);
     LIST_FOREACH(vqp_entry, &mqp->vqp_list, entry) {
         if (vqp_entry->qpn == vqp_idx) {
+            pthread_spin_unlock(&mqp->vqp_list_lock);
             return vqp_entry->vqp;
         }
     }
+    pthread_spin_unlock(&mqp->vqp_list_lock);
     return NULL;
 }
 
@@ -312,6 +315,7 @@ void
 set_spdk_vrdma_bk_qp_active(struct vrdma_backend_qp *bk_qp)
 {
     struct vrdma_vqp *vqp_entry = NULL;
+    pthread_spin_lock(&bk_qp->vqp_list_lock);
     LIST_FOREACH(vqp_entry, &bk_qp->vqp_list, entry) {
         vqp_entry->vqp->bk_qp = bk_qp;
 #ifdef MPATH_DBG
@@ -319,6 +323,7 @@ set_spdk_vrdma_bk_qp_active(struct vrdma_backend_qp *bk_qp)
                        vqp_entry->qpn, bk_qp->bk_qp.qpnum);
 #endif
     }
+    pthread_spin_unlock(&bk_qp->vqp_list_lock);
 }
 
 struct vrdma_backend_qp *
@@ -336,6 +341,9 @@ vrdma_create_backend_qp(struct vrdma_tgid_node *tgid_node,
 		SPDK_ERRLOG("Failed to allocate backend QP memory");
 		return NULL;
 	}
+    LIST_INIT(&qp->vqp_list);
+    pthread_spin_init(&qp->vqp_list_lock, PTHREAD_PROCESS_PRIVATE);
+    qp->tgid_node = tgid_node;
 	qp->pd = tgid_node->pd;
 	qp->poller_core = VRDMA_INVALID_POLLER_CORE;
 	qp->remote_qpn = VRDMA_INVALID_QPN;
@@ -377,8 +385,8 @@ int vrdma_query_bankend_qp_next_rcv_psn(struct vrdma_backend_qp *bk_qp,
                     bk_qp->bk_qp.qpnum);
         return -1;
     }
-    SPDK_NOTICELOG("Succeeded to query bankend QP=0x%x",
-                   bk_qp->bk_qp.qpnum);
+    SPDK_NOTICELOG("Succeeded to query bankend QP=0x%x next_rcv_psn=%u",
+                   bk_qp->bk_qp.qpnum, *next_rcv_psn);
     return 0;
 }
 
@@ -475,8 +483,8 @@ void vrdma_destroy_backend_qp(struct vrdma_backend_qp **mqp)
     *mqp = NULL;
 }
 
-static void 
-vrdma_dummy_rx_cb(struct snap_dma_q *q, const void *data, 
+static void
+vrdma_dummy_rx_cb(struct snap_dma_q *q, const void *data,
 						uint32_t data_len, uint32_t imm_data)
 {
 	snap_error("VRDMA: rx cb called\n");
@@ -589,10 +597,10 @@ bool vrdma_set_vq_flush(struct vrdma_ctrl *ctrl,
         q_size = mqp->bk_qp.hw_qp.sq.wqe_cnt;
         mqp_pi = mqp->bk_qp.hw_qp.sq.pi;
         mqp_ci = mqp->bk_qp.sq_ci;
-        if (vrdma_vq_rollback(mqp_pi, mqp_ci, q_size)) {
-            mqp_ci += q_size;
+        if (vrdma_vq_rollback(mqp_ci, mqp_pi, q_size)) {
+            mqp_pi += q_size;
         }
-        for (wqe_idx = mqp_ci + 1; wqe_idx < mqp_pi; wqe_idx++) {
+        for (wqe_idx = mqp_ci; wqe_idx < mqp_pi; wqe_idx++) {
             sq_meta = &mqp->sq_meta_buf[wqe_idx & (q_size - 1)];
             if (sq_meta->vqp && sq_meta->vqp->qp_idx == vqp->qp_idx)
                 sq_meta->vqp = NULL;
@@ -651,16 +659,16 @@ void vrdma_set_rpc_msg_with_mqp_info(struct vrdma_ctrl *ctrl,
 {
     struct vrdma_backend_qp *mqp = tgid_node->src_udp[mqp_idx].mqp;
     msg->emu_manager = ctrl->emu_manager;
-    memcpy(&msg->sf_mac, &tgid_node->local_vdev->vrdma_sf.mac, 6);
+    memcpy(&msg->sf_mac, &tgid_node->ctrl->vdev->vrdma_sf.mac, 6);
     msg->bk_qpn = mqp->bk_qp.qpnum;
     msg->qp_state = mqp->qp_state;
     msg->mqp_idx = mqp_idx;
     msg->next_rcv_psn = mqp->mig_ctx.mig_lnxt_rcv_psn;
     msg->local_tgid = tgid_node->key.local_tgid;
     msg->remote_tgid = tgid_node->key.remote_tgid;
-    msg->local_mgid.global.interface_id = tgid_node->local_vdev->vrdma_sf.ip;
+    msg->local_mgid.global.interface_id = tgid_node->ctrl->vdev->vrdma_sf.ip;
     msg->local_mgid.global.subnet_prefix = 0;
-    msg->remote_mgid.global.interface_id = tgid_node->local_vdev->vrdma_sf.remote_ip;
+    msg->remote_mgid.global.interface_id = tgid_node->ctrl->vdev->vrdma_sf.remote_ip;
     msg->remote_mgid.global.subnet_prefix = 0;
 }
 
@@ -706,21 +714,21 @@ vrdma_ctrl_find_dma_qp(struct vrdma_ctrl *ctrl,
 	struct snap_vrdma_queue *snap_queue;
 
 	if (!(pg_id < VRDMA_MAX_THREAD_NUM)) {
-		SPDK_ERRLOG("pg id is too large %d \n", 
+		SPDK_ERRLOG("pg id is too large %d \n",
 					pg_id);
 		return NULL;
 	}
-	
+
 	if (!ctrl->sw_dma_q[pg_id]) {
 		snap_queue = vrdma_ctrl_create_dma_qp(ctrl, vqp);
 		if (!snap_queue) {
-			SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n", 
+			SPDK_ERRLOG("Failed to create qp dma queue for thread %d \n",
 						pg_id);
 			return NULL;
 		}
 		ctrl->sw_dma_q[pg_id] = snap_queue;
 	}
-	
+
 	return ctrl->sw_dma_q[pg_id];
 }
 
@@ -735,11 +743,11 @@ sw_dma_qp_destroy(struct snap_vrdma_queue *sw_dma_qp)
 	}
 	free(sw_dma_qp);
 }
-									
+
 static int vrdma_sched_vq_nolock(struct snap_vrdma_ctrl *ctrl,
 					    struct spdk_vrdma_qp *vq,
 					    struct snap_pg *pg)
-{	
+{
 	TAILQ_INSERT_TAIL(&pg->q_list, &vq->pg_q, entry);
 	vq->pg = pg;
 	return 0;
@@ -764,7 +772,7 @@ int vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 	return 0;
 }
 
-static void vrdma_desched_vq_nolock(struct spdk_vrdma_qp *vq)
+void vrdma_desched_vq_nolock(struct spdk_vrdma_qp *vq)
 {
 	struct snap_pg *pg = vq->pg;
 

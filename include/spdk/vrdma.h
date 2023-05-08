@@ -259,12 +259,19 @@ struct vrdma_vkey_tbl {
 	struct vrdma_vkey_entry vkey[VRDMA_DEV_MAX_MR];
 };
 
+enum mig_repost_state {
+    MIG_REPOST_INIT  = 0,               /* no need repost */
+    MIG_REPOST_SET   = 1,               /* need repost, will find repost pi */
+    MIG_REPOST_START = 2,               /* found repost pi */
+};
+
 struct vrdma_vqp_mig_ctx {
 #define VRDMA_MIG_INTERVAL_MIN     5*60 /* 5 seconds */
     uint64_t mig_start_ts;              /* start timestamp of last migration */
     uint8_t  mig_state;                 /* IDLE, PREPARE, START */
-    uint8_t  mig_repost;                /* 1 means need repost wqe */
-    uint16_t mig_repost_pi;             /* from which wqe to repost wqe */
+    uint8_t  mig_repost;                /* repost state, none zero means need repost */
+    uint16_t mig_repost_pi;             /* from which wqe to repost */
+    uint32_t mig_repost_offset;         /* psn offset in the repost wqe */
     uint32_t mig_wqe_len;               /* tmp buf to save wqe total data len */
     struct vrdma_backend_qp *mig_mqp;   /* mqp to be migrated to */
 };
@@ -297,7 +304,7 @@ struct spdk_vrdma_qp {
 	uint8_t	port_num;
 	uint8_t	max_rd_atomic;
 	uint8_t	max_dest_rd_atomic;
-	uint32_t qdb_idx;	
+	uint32_t qdb_idx;
 	uint32_t flags;
 	struct vrdma_vkey_tbl *l_vkey_tbl;
 	uint32_t wait_vkey;

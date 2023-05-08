@@ -371,7 +371,7 @@ spdk_vrdma_client_qp_resp_handler(struct spdk_vrdma_rpc_client *client,
     mqp = tgid_node->src_udp[attr->mqp_idx].mqp;
     if (is_vrdma_vqp_migration_enable() && mqp->qp_state == IBV_QPS_ERR) {
         mqp->mig_ctx.mig_rnxt_rcv_psn = attr->next_rcv_psn;
-        vrdma_mig_set_mqp_repost_pi(mqp);
+        mqp->mig_ctx.mig_rnxt_rcv_psn_state = MIG_RESP_RCV;
     } else if (mqp->qp_state != IBV_QPS_RTS) {
         if (mqp->qp_state == IBV_QPS_INIT) {
             spdk_vrdma_set_qp_attr(ctrl, tgid_node, attr, &qp_attr, &attr_mask, &rdy_attr);
@@ -638,8 +638,7 @@ spdk_vrdma_rpc_srv_qp_req_handle(struct spdk_jsonrpc_request *request,
     if (!tgid_node) {
         tgid_node = vrdma_create_tgid_node(&attr->local_tgid,
                                            &attr->remote_tgid,
-                                           ctrl->vdev,
-                                           ctrl->vdev->vrdma_sf.sf_pd,
+                                           ctrl,
                                            0xc000, spdk_env_get_core_count());
         if (!tgid_node) {
             goto invalid;
@@ -1069,6 +1068,7 @@ struct spdk_vrdma_rpc_controller_configue_attr {
     int32_t tgid;
     int32_t show_mqp;
     int32_t modify_mqp;
+    int32_t meta_start;
 };
 
 static const struct spdk_json_object_decoder
@@ -1203,6 +1203,12 @@ spdk_vrdma_rpc_controller_configue_decoder[] = {
         spdk_json_decode_int32,
         true
     },
+    {
+        "meta_start",
+        offsetof(struct spdk_vrdma_rpc_controller_configue_attr, meta_start),
+        spdk_json_decode_int32,
+        true
+    },
 };
 
 static struct spdk_emu_ctx *
@@ -1334,6 +1340,7 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
     attr->tgid = -1;
     attr->show_mqp = -1;
     attr->modify_mqp = -1;
+    attr->meta_start = -1;
 
     if (spdk_json_decode_object(params,
             spdk_vrdma_rpc_controller_configue_decoder,
@@ -1592,7 +1599,7 @@ spdk_vrdma_rpc_controller_configue(struct spdk_jsonrpc_request *request,
         struct vrdma_tgid_node *tmp_node;
         LIST_FOREACH_SAFE(tgid_node, &vrdma_tgid_list, entry, tmp_node) {
             if (attr->modify_mqp == -1) {
-                vrdma_dump_tgid_node(tgid_node, attr->show_mqp);
+                vrdma_dump_tgid_node(tgid_node, attr->show_mqp, attr->meta_start);
             } else {
                 vrdma_modify_backend_qp_to_err(tgid_node->src_udp[attr->modify_mqp].mqp);
             }

@@ -52,7 +52,7 @@
 #define VRDMA_BACKEND_QP_RETRY_COUNT 7
 #define VRDMA_BACKEND_QP_RNR_RETRY 7
 #define VRDMA_BACKEND_QP_SQ_SIZE 32*1024
-#define VRDMA_BACKEND_QP_RQ_SIZE 32*1024
+#define VRDMA_BACKEND_QP_RQ_SIZE 256
 #define VRDMA_QP_MAX_RD_ATOMIC 16
 #define MPATH_DBG
 struct snap_vrdma_backend_qp;
@@ -66,10 +66,12 @@ struct mqp_sq_meta {
 };
 
 struct vrdma_backend_qp {
+    struct vrdma_tgid_node *tgid_node;
     struct ibv_pd *pd;
 #define VRDMA_INVALID_POLLER_CORE 0xFFFFFFFF
     uint32_t poller_core;                       /* is also this mqp index in tgid_node */
     struct snap_vrdma_backend_qp bk_qp;
+    pthread_spinlock_t vqp_list_lock;
     LIST_HEAD(, vrdma_vqp) vqp_list;
     uint32_t vqp_cnt;
     uint32_t remote_qpn;
@@ -120,12 +122,9 @@ void vrdma_destroy_tgid_list(void);
 struct vrdma_tgid_node *
 vrdma_create_tgid_node(union ibv_gid *remote_tgid,
                        union ibv_gid *local_tgid,
-                       struct spdk_vrdma_dev *local_vdev,
-                       struct ibv_pd *local_pd,
+                       struct vrdma_ctrl *ctrl,
                        uint16_t udp_sport_start,
                        uint32_t max_mqp_cnt);
-struct vrdma_tgid_node *
-vrdma_find_tgid_node_by_mqp(uint8_t mqp_idx, struct vrdma_backend_qp *mqp);
 struct vrdma_backend_qp *
 vrdma_create_backend_qp(struct vrdma_tgid_node *tgid_node,
                         uint8_t mqp_idx);
@@ -157,8 +156,10 @@ static inline int vrdma_vq_rollback(uint16_t pre_pi, uint16_t pi,
 int vrdma_sched_vq(struct snap_vrdma_ctrl *ctrl,
 				     	struct spdk_vrdma_qp *vq, struct snap_pg *pg);
 void vrdma_desched_vq(struct spdk_vrdma_qp *vq);
+void vrdma_desched_vq_nolock(struct spdk_vrdma_qp *vq);
 void vrdma_ctrl_destroy_dma_qp(struct vrdma_ctrl *ctrl);
-void vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node, int32_t specified_mqp);
+void vrdma_dump_tgid_node(struct vrdma_tgid_node *tgid_node,
+                          int32_t specified_mqp, int32_t meta_start);
 struct vrdma_backend_qp *
 vrdma_find_mqp_by_depth(struct vrdma_tgid_node *tgid_node, uint8_t *mqp_idx);
 #endif

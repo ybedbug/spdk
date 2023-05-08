@@ -44,16 +44,20 @@ enum vrdma_mig_state {
     MIG_START   = 2,
 };
 
+enum mig_rnxt_rcv_psn_state {
+    MIG_REQ_NULL   = 0,
+    MIG_REQ_SENT   = 1,
+    MIG_RESP_RCV   = 2,
+};
+
 struct vrdma_mqp_mig_ctx {
     uint32_t mig_pmtu;
 #define PSN_MASK                   0xFFFFFF /* 24 bits */
     /* first PSN of the current executing WQE in the Send Queue */
     uint32_t msg_1st_psn;                   /* 1st psn of current wqe */
-    uint16_t mig_repost_pi;                 /* from which wqe to repost wqe */
-#define VRDMA_MIG_INVALID_PSN      0xFFFFFFFF
     uint32_t mig_lnxt_rcv_psn;              /* local next_rcv_psn in qpc */
+    uint32_t mig_rnxt_rcv_psn_state:8;      /* 1 indicate has sent msg to peer */
     uint32_t mig_rnxt_rcv_psn;              /* remote next_rcv_psn in qpc */
-    uint32_t mig_repost_offset;             /* psn offset in 1st repost wqe */
 };
 
 extern pthread_spinlock_t vrdma_mig_vqp_list_lock;
@@ -65,6 +69,10 @@ void vrdma_mig_mqp_depth_sampling(struct vrdma_backend_qp *mqp);
 void vrdma_mig_handle_sm(struct spdk_vrdma_qp *vqp);
 void vrdma_mig_set_mqp_pmtu(struct vrdma_backend_qp *mqp,
                             struct ibv_qp_attr *qp_attr);
-int32_t vrdma_mig_set_mqp_repost_pi(struct vrdma_backend_qp *mqp);
+int32_t vrdma_mig_set_repost_pi(struct vrdma_backend_qp *mqp);
+void
+vrdma_mig_reassemble_wqe(struct vrdma_send_wqe *wqe,
+                         uint32_t mig_repost_offset,
+                         uint32_t pmtu);
 int vrdma_migration_progress(struct vrdma_ctrl *ctrl);
 #endif

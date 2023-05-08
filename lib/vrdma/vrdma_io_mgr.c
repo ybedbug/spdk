@@ -614,7 +614,7 @@ static inline void vrdma_wqe_submit(struct snap_vrdma_backend_qp *bk_qp,
 									struct mlx5_wqe_ctrl_seg *ctrl)
 {
 	uint8_t ds = be32toh(ctrl->qpn_ds) & 0xFF;
-	
+
 	bk_qp->hw_qp.sq.pi += DIV_ROUND_UP(ds * 16, MLX5_SEND_WQE_BB);
 #if 0
 	if (bk_qp->db_flag == SNAP_DB_RING_BATCH) {
@@ -775,6 +775,7 @@ static inline bool vrdma_set_data_seg(struct vrdma_send_wqe *wqe, void *seg,
 		dseg = seg;
 		sge_num = wqe->meta.sge_num;
 		for (i = 0; i < sge_num; i++) {
+            vqp->mig_ctx.mig_wqe_len = 0;
 			sge = wqe->sgl[i];
 			if (spdk_likely(sge.buf_length)) {
 				sge_addr = ((uint64_t)sge.buf_addr_hi << 32) + sge.buf_addr_lo;
@@ -1069,6 +1070,13 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 			case MLX5_OPCODE_RDMA_READ:
 			case MLX5_OPCODE_RDMA_WRITE:
 			case MLX5_OPCODE_RDMA_WRITE_IMM:
+			    if (i == 0 && vqp->mig_ctx.mig_repost == MIG_REPOST_START &&
+			        vqp->mig_ctx.mig_repost_offset) {
+			        vrdma_mig_reassemble_wqe(wqe, vqp->mig_ctx.mig_repost_offset,
+			                                 mqp->mig_ctx.mig_pmtu);
+			        /* clear repost flag */
+                    vqp->mig_ctx.mig_repost == MIG_REPOST_INIT;
+			    }
 				vrdma_rw_wqe_submit(wqe, vqp, backend_qp, opcode, i);
 				if (vqp->sm_state != VRDMA_QP_STATE_MKEY_WAIT)
 					vqp->stats.sq_wqe_wr++;
@@ -1086,30 +1094,30 @@ static bool vrdma_qp_wqe_sm_submit(struct spdk_vrdma_qp *vqp,
 				vqp->sm_state = VRDMA_QP_STATE_FATAL_ERR;
 				return false;
 		}
+		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {
+			vqp->sq.comm.pre_pi += i;
+			vrdma_tx_complete(backend_qp);
+#ifdef WQE_DBG
+			SPDK_NOTICELOG("vrdam vqp=%p, is in wait state when submit, pre_pi %d\n",
+							vqp, vqp->sq.comm.pre_pi);
+#endif
+			return true;
+		}
         if (is_vrdma_vqp_migration_enable()) {
             vqp->sq.meta_buff[(vqp->sq.comm.pre_pi + i) % q_size].mqp_wqe_idx = backend_qp->hw_qp.sq.pi;
             sq_meta->first_psn = mqp->mig_ctx.msg_1st_psn;
             sq_meta->last_psn  = sq_meta->first_psn +
-                                 (vqp->mig_ctx.mig_wqe_len/mqp->mig_ctx.mig_pmtu - 1);
-#ifdef MPATH_DBG
-            SPDK_NOTICELOG("vrdam vqp=%u, twqe_idx=%u, mqp_wqe_idx=%u first_psn=%u, last_psn=%u\n",
+                                 (vqp->mig_ctx.mig_wqe_len - 1)/mqp->mig_ctx.mig_pmtu;
+#ifdef WQE_DBG
+            SPDK_NOTICELOG("vrdam vqp=%u, twqe_idx=%u, mqp_pi=%u sq_meta=%p first_psn=%u, last_psn=%u\n",
                             vqp->qp_idx, sq_meta->twqe_idx, backend_qp->hw_qp.sq.pi,
-                            sq_meta->first_psn, sq_meta->last_psn);
+                            sq_meta, sq_meta->first_psn, sq_meta->last_psn);
 #endif
             mqp->mig_ctx.msg_1st_psn = (sq_meta->last_psn + 1) & PSN_MASK;//psn 24 bits
             if (i == (num_to_parse - 1)) {
                 wqe->meta.send_flags |= IBV_SEND_SIGNALED;
             }
         }
-		if (vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT) {	
-			vqp->sq.comm.pre_pi += i; 
-			vrdma_tx_complete(backend_qp);
-#ifdef WQE_DBG
-			SPDK_NOTICELOG("vrdam vqp=%p, is in wait state when submit, pre_pi %d\n", 
-							vqp, vqp->sq.comm.pre_pi);
-#endif
-			return true;
-		}
 	}
 	vrdma_tx_complete(backend_qp);
 	vqp->stats.msq_dbred_pi = backend_qp->hw_qp.sq.pi;
@@ -1284,7 +1292,7 @@ static bool vrdma_qp_wqe_sm_mkey_wait(struct spdk_vrdma_qp *vqp,
 #ifdef WQE_DBG
 	pid_t tid = gettid();
 
-	SPDK_NOTICELOG("<tid %d> vqpn %d mkey is in wait state \n", 
+	SPDK_NOTICELOG("<tid %d> vqpn %d mkey is in wait state \n",
 					tid, vqp->qp_idx);
 #endif
 	pthread_spin_lock(&vrdma_r_vkey_list_lock);
@@ -1366,7 +1374,7 @@ static int vrdma_write_back_sq_cqe(struct spdk_vrdma_qp *com_vqp,
 	/* setup owner bit */
 	for (i = 0; i < cqe_num; i++) {
 		vcqe = (struct vrdma_cqe *)com_vqp->sq.local_cq_buff + i;
-		/* owner bit should be alligned with provider side 
+		/* owner bit should be alligned with provider side
 		 * currently, provider side set this value to 0
 		 */
 		vcqe->owner = !((cqe_idx++) & (vcq->cqe_entry_num));
@@ -1464,7 +1472,7 @@ static int vrdma_write_back_sq_cqe(struct spdk_vrdma_qp *com_vqp,
 	SPDK_NOTICELOG("vrdam gen vsq cqe done: vcq new pi %d, write back vcqe num %d\n",
 					pi, cqe_num);
 #endif
-	
+
 	return 0;
 }
 
@@ -1612,13 +1620,13 @@ static bool vrdma_qp_sm_gen_completion(struct spdk_vrdma_qp *vqp,
 		clock_gettime(CLOCK_REALTIME, &end_tv);
 
 		//SPDK_NOTICELOG("test each cqe handle time %lu\n", (end_tv.tv_nsec - start_tv.tv_nsec));
-		
+
 		return false;
 	}
 
 null_cqe:
 	return true;
-	
+
 #if 0
 ring_db:
     if (cqe_num) {
@@ -1629,7 +1637,7 @@ ring_db:
             return true;
         } else {
 			vqp->q_comp.count = dma_wqe_cnt;
-			if (dma_wqe_cnt > 100) 
+			if (dma_wqe_cnt > 100)
 				SPDK_NOTICELOG("write cq CQE entry, dma wqe cnt %d\n", dma_wqe_cnt);
 			return false;
 		}
@@ -1711,12 +1719,7 @@ void vrdma_dpa_rx_cb(struct spdk_vrdma_qp *vqp,
 		enum vrdma_qp_sm_op_status status)
 {
 	vqp->stats.sq_wqe_fetched += vqp->sq.comm.num_to_parse;
-	vqp->bk_qp = vrdma_vq_get_mqp(vqp);
 	/* todo for error vcqe handling */
-	if (spdk_unlikely(!vqp->bk_qp)) {
-		SPDK_ERRLOG("vrdma dpa rx, no backend qp is created for vqpn %d\n", vqp->qp_idx);
-		return;
-	}
 	vrdma_qp_wqe_sm_submit(vqp, status);
 	if (vqp->sw_state == VRDMA_QP_SW_STATE_FLUSHING) {
 		vqp->sw_state = VRDMA_QP_SW_STATE_SUSPENDED;
@@ -1763,7 +1766,7 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 									struct spdk_vrdma_qp *vqp)
 {
 	printf("\n========= vrdma qp debug counter =========\n");
-	printf("sf_name %s, gvmi 0x%x, spdk_core %d, pg_core %d\n", 
+	printf("sf_name %s, gvmi 0x%x, spdk_core %d, pg_core %d\n",
 			ctrl->vdev->vrdma_sf.sf_name, ctrl->vdev->vrdma_sf.gvmi,
 			vqp->thread_id, vqp->pg ? vqp->pg->id : 255);
 	printf("\nsq_wqe_buff_pa %#lx, sq_pi_paddr %#lx,"
@@ -1827,6 +1830,14 @@ void vrdma_dump_vqp_stats(struct vrdma_ctrl *ctrl,
 			vqp->dpa_vqp.dpa_thread->dpa_dma_qp ? "not_null" : "null",
 			vqp->snap_queue->dma_q ? "not_null" : "null");
 	}
+    if (is_vrdma_vqp_migration_enable()) {
+        printf("\n========= migration context debug info =========\n");
+        printf("mig_state=%u, mig_start_ts=%lu, wqe_len=%u, mig_repost=%u, "
+               "repost_pi=%u repost_offset=%u\n",
+               vqp->mig_ctx.mig_state, vqp->mig_ctx.mig_start_ts,
+               vqp->mig_ctx.mig_wqe_len, vqp->mig_ctx.mig_repost,
+               vqp->mig_ctx.mig_repost_pi, vqp->mig_ctx.mig_repost_offset);
+    }
 }
 
 void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
@@ -1842,7 +1853,7 @@ void vrdma_dump_dpa_thread_stats(uint16_t dpa_thread_id)
 		printf("g_dpa_thread is NULL\n");
 		return;
 	}
-	
+
 	dpa_thread = &g_dpa_threads[dpa_thread_id];
 	printf("\n========= dpa thread debug info =========\n");
 	if (dpa_thread->sw_dma_qp && dpa_thread->sw_dma_qp->dma_q &&
@@ -1920,7 +1931,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 	/* setup owner bit */
 	for (i = 0; i < cqe_num; i++) {
 		vcqe = (struct vrdma_cqe *)vqp->sq.local_cq_buff + i;
-		/* owner bit should be alligned with provider side 
+		/* owner bit should be alligned with provider side
 		 * currently, provider side set this value to 0
 		 */
 		vcqe->owner = !((cqe_idx++) & (vcq->cqe_entry_num));
@@ -2018,7 +2029,7 @@ static int vrdma_write_back_sq_cqe_no_cb(struct spdk_vrdma_qp *vqp,
 	SPDK_NOTICELOG("<tid %d> vrdam gen vsq cqe done: vcq new pi %d, write back vcqe num %d\n",
 					tid, pi, cqe_num);
 #endif
-	
+
 	return 0;
 }
 
@@ -2062,11 +2073,16 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
             bk_qp->qp_state = IBV_QPS_ERR;
             if (is_vrdma_vqp_migration_enable()) {
                 struct mlx5_err_cqe *ecqe = (struct mlx5_err_cqe *)cqe;
-                if (ecqe->syndrome == MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR ||
-                    ecqe->syndrome == MLX5_CQE_SYNDROME_WR_FLUSH_ERR) {
-                    comp_vqp->mig_ctx.mig_repost = 1;
+                SPDK_NOTICELOG("vqp=%u got err cqe synd=0x%x sq_ci=%u mqp.sq_ci=%u\n",
+                                comp_vqp->qp_idx, ecqe->syndrome, comp_vqp->sq_ci, bk_qp->bk_qp.sq_ci);
+                if (comp_vqp->mig_ctx.mig_repost) {
+                    goto null_cqe;
+                } else if (ecqe->syndrome == MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR ||
+                           ecqe->syndrome == MLX5_CQE_SYNDROME_WR_FLUSH_ERR) {
+                    comp_vqp->mig_ctx.mig_repost = MIG_REPOST_SET;
                     comp_vqp->mig_ctx.mig_state = MIG_START;
                     comp_vqp->sq_ci = sq_meta->twqe_idx + 1;
+                    bk_qp->bk_qp.sq_ci = vrdma_get_wqe_id(bk_qp, cqe->wqe_counter) + 1;
                     goto null_cqe;
                 }
             }
@@ -2108,7 +2124,7 @@ static void vrdma_qp_handle_completion(struct vrdma_backend_qp *bk_qp)
 
 null_cqe:
 	return;
-	
+
 #if 0
 ring_db:
     if (cqe_num) {
@@ -2119,7 +2135,7 @@ ring_db:
             return true;
         } else {
 			vqp->q_comp.count = dma_wqe_cnt;
-			if (dma_wqe_cnt > 100) 
+			if (dma_wqe_cnt > 100)
 				SPDK_NOTICELOG("write cq CQE entry, dma wqe cnt %d\n", dma_wqe_cnt);
 			return false;
 		}
@@ -2189,7 +2205,7 @@ out:
 
 uint8_t g_wqe_cnt = 0;
 
-static inline void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp) 
+static inline void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 {
 	uint16_t pi, pre_pi;
 	struct timespec start_tv, end_tv;
@@ -2205,10 +2221,14 @@ static inline void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 		//				vqp->qp_idx, vqp->local_pi, get_vqp_sw_state(vqp));
 		return;
 	}
+	if (spdk_unlikely(!vrdma_vq_get_mqp(vqp))) {
+		SPDK_ERRLOG("vrdma dpa rx, no backend qp is created for vqpn %d\n", vqp->qp_idx);
+		return;
+	}
 
 	pi = vqp->qp_pi->pi.sq_pi;
 	pre_pi = vqp->sq.comm.pre_pi;
-	
+
 	if (spdk_unlikely(vqp->sm_state == VRDMA_QP_STATE_MKEY_WAIT)) {
 		vrdma_handle_mkey_wait(vqp);
 		//SPDK_NOTICELOG("vqp %d, is in mkey wait state, local pi %d\n",
@@ -2229,14 +2249,14 @@ static inline void vrdma_qp_post_wqe(struct spdk_vrdma_qp *vqp)
 		tmp = (end_tv.tv_sec - start_tv.tv_sec) * 1000 * 1000 * 1000 + end_tv.tv_nsec;
 		vqp->stats.latency_map += tmp - start_tv.tv_nsec;
 	}
-	
+
 #if 0
 	SPDK_NOTICELOG("VRDMA: vqp %d, post wqe, pi %d, pre_pi %d, num_to_parse %d\n",
 					vqp->qp_idx, pi, pre_pi, vqp->sq.comm.num_to_parse);
 #endif
 }
 
-static inline void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp) 
+static inline void vrdma_qp_poll_cq(struct spdk_vrdma_qp *vqp)
 {
 	struct vrdma_backend_qp *bk_qp = vqp->bk_qp;
 
@@ -2251,7 +2271,7 @@ void vrdma_qp_process(struct spdk_vrdma_qp *vqp)
 	if (spdk_unlikely(!vqp)) {
 		return;
 	}
-	
+
 	vrdma_qp_post_wqe(vqp);
 	vrdma_qp_poll_cq(vqp);
 }

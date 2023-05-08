@@ -252,12 +252,12 @@ int vrdma_srv_bind_channel(struct vrdma_dev *rdev,
     }
     if (vqp->pre_bk_qp->poller_core == VRDMA_INVALID_POLLER_CORE) {
         vqp->pre_bk_qp->poller_core = mqp_idx;
-        //SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
-         //              vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, mqp_idx);
+        SPDK_NOTICELOG("vqp=%u mqp=0x%x has bond to new poller_core=%u\n",
+                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum, mqp_idx);
     } else {
-        //SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
-        //               vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
-        //               vqp->pre_bk_qp->poller_core);
+        SPDK_NOTICELOG("vqp=%u mqp=0x%x has exsiting poller_core=%u\n",
+                       vqp->qp_idx, vqp->pre_bk_qp->bk_qp.qpnum,
+                       vqp->pre_bk_qp->poller_core);
     }
     pg = &ctrl->sctrl->pg_ctx.pgs[vqp->pre_bk_qp->poller_core];
 	pg->id = mqp_idx;
@@ -325,7 +325,7 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
         memcpy(&local_tgid, ctrl->vdev->vrdma_sf.mac, sizeof(ctrl->vdev->vrdma_sf.mac));
         memcpy(&remote_tgid, ctrl->vdev->vrdma_sf.dest_mac, sizeof(ctrl->vdev->vrdma_sf.dest_mac));
 #endif
-#if 0 
+#if 0
         SPDK_NOTICELOG("l_tgid.global.interface_id=%llx, l_tgid.global.subnet_prefix=%llx\n"
                        "r_tgid.global.interface_id=%llx, r_tgid.global.subnet_prefix=%llx\n",
                        local_tgid.global.interface_id, local_tgid.global.subnet_prefix,
@@ -334,8 +334,7 @@ static int vrdma_srv_device_modify_qp(struct vrdma_dev *rdev,
         tgid_node = vrdma_find_tgid_node(&remote_tgid, &local_tgid);
         if (!tgid_node) {
             tgid_node = vrdma_create_tgid_node(&remote_tgid, &local_tgid,
-                                               ctrl->vdev,
-                                               ctrl->vdev->vrdma_sf.sf_pd,
+                                               ctrl,
                                                0xc000,
                                                spdk_env_get_core_count());
             if (!tgid_node) {
