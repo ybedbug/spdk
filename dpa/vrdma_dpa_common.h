@@ -51,6 +51,11 @@
 
 #define VRDMA_CQ_WAIT_THRESHOLD(cq_len)  (cq_len >> 2)
 
+enum {
+	VRDMA_DPA_VQP_FLAGS_STOPPED_BIT = 1,
+	VRDMA_DPA_VQP_FLAGS_BIT_MAX,
+};
+
 enum{
 	MLX5_CTRL_SEG_OPCODE_RDMA_WRITE                      = 0x8,
 	MLX5_CTRL_SEG_OPCODE_RDMA_WRITE_WITH_IMMEDIATE       = 0x9,
@@ -152,6 +157,7 @@ struct vrdma_arm_vq_ctx {
 	uint64_t sq_buff_addr;
 	uint64_t rq_pi_addr;
 	uint64_t sq_pi_addr;
+	uint64_t handle_flags_addr;
 	uint32_t rq_lkey;
 	uint32_t sq_lkey;
 } __attribute__((__packed__, aligned(8)));
@@ -221,6 +227,7 @@ struct vrdma_dpa_vq_data {
 
 enum dpa_vqp_modify_field_bit{
 	VRDMA_DPA_VQP_MOD_REPOST_PI_BIT = 1,
+	VRDMA_DPA_VQP_MOD_STOP_FETCH_BIT = 2,
 	VRDMA_DPA_VQP_MOD_MAX,
 };
 

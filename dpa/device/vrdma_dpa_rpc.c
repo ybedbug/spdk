@@ -78,6 +78,27 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	ectx = (struct vrdma_dpa_event_handler_ctx *)vqp_ctx->eh_ctx_daddr;
 	vrdma_debug_count_set(ectx, 0);
 
+	/* for vqp migration repost */
+	if (vqp_ctx->mctx.field & (1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT)) {
+		vqp_ctx->sq_last_fetch_start = vqp_ctx->mctx.repost_pi;
+		vqp_ctx->mctx.field &= ~(1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT | 
+								1 << VRDMA_DPA_VQP_MOD_STOP_FETCH_BIT);
+		flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
+				      		vqp_ctx->emu_db_to_cq_id);
+		flexio_dev_db_ctx_force_trigger(dtctx, ectx->guest_db_cq_ctx.cqn,
+						vqp_ctx->emu_db_to_cq_id);
+		return 0;
+	}
+
+	/* for vqp migration stop fetch */
+	if (vqp_ctx->mctx.field & (1 << VRDMA_DPA_VQP_MOD_STOP_FETCH_BIT)) {
+		flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
+				      		vqp_ctx->emu_db_to_cq_id);
+		flexio_dev_db_ctx_force_trigger(dtctx, ectx->guest_db_cq_ctx.cqn,
+						vqp_ctx->emu_db_to_cq_id);
+		return 0;
+	}
+
 	/* insert new added vqp to thread ctx */
 	free_idx = vqp_ctx->free_idx;
 	if (!(vqp_ctx->free_idx < VQP_PER_THREAD)) {
@@ -116,21 +137,19 @@ uint64_t vrdma_qp_rpc_handler(uint64_t arg1)
 	ectx->vqp_ctx_hdl[vqp_ctx->emu_db_to_cq_id].valid = valid;
 	spin_unlock(&ectx->vqp_array_lock);
 	//vrdma_debug_value_set(ectx, 7, vqp_ctx->emu_db_to_cq_id);
-#ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
-	printf("\n vrdma_qp_rpc_handler get free idx %d, db handle %d, vqp_ctx_handle %llx, vqp idx %d\n",
-			free_idx, vqp_ctx->emu_db_to_cq_id, (flexio_uintptr_t)vqp_ctx, vqp_ctx->vq_index);
-#endif
 	flexio_dev_outbox_config(dtctx, ectx->emu_outbox);
+	flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
+				      vqp_ctx->emu_db_to_cq_id);
+	flexio_dev_cq_arm(dtctx, ectx->guest_db_cq_ctx.ci,
+				  		ectx->guest_db_cq_ctx.cqn);
+
 #ifdef VRDMA_RPC_TIMEOUT_ISSUE_DEBUG
 	printf("\n vrdma_qp_rpc_handler cqn: %#x, emu_db_to_cq_id %d,"
 		"guest_db_cq_ctx.ci %d, vqp cnt %d\n", ectx->guest_db_cq_ctx.cqn,
 		vqp_ctx->emu_db_to_cq_id, ectx->guest_db_cq_ctx.ci,
 		ectx->vqp_count);
 #endif
-	flexio_dev_db_ctx_arm(dtctx, ectx->guest_db_cq_ctx.cqn,
-				      vqp_ctx->emu_db_to_cq_id);
-	flexio_dev_cq_arm(dtctx, ectx->guest_db_cq_ctx.ci,
-				  		ectx->guest_db_cq_ctx.cqn);
+
 #if 0
 
 	flexio_dev_db_ctx_force_trigger(dtctx, ectx->guest_db_cq_ctx.cqn,
