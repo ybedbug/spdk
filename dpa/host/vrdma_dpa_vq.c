@@ -738,6 +738,7 @@ vrdma_set_dpa_vqp_attr(struct vrdma_prov_vqp_init_attr *attr,
 	attr->arm_vq_ctx.rq_buff_addr = (uint64_t)vqp->rq.rq_buff;
 	attr->arm_vq_ctx.sq_buff_addr = (uint64_t)vqp->sq.sq_buff;
 	attr->arm_vq_ctx.sq_pi_addr = (uint64_t)&vqp->qp_pi->pi.sq_pi;
+	attr->arm_vq_ctx.handle_flags_addr = (uint64_t)&vqp->qp_pi->handle_flags;
 	attr->arm_vq_ctx.rq_lkey      = vqp->qp_mr->lkey;
 	attr->arm_vq_ctx.sq_lkey      = vqp->qp_mr->lkey;
 
@@ -796,59 +797,6 @@ vrdma_dpa_vq_ctx_init(const struct vrdma_dpa_thread_ctx *dpa_thread,
 
 	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
 				     			eh_qp_data, sizeof(*eh_qp_data),
-				     			vqp->dpa_vqp.dpa_heap_memory);
-	if (err) {
-		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
-		ret = -1;
-		goto free_memory;
-	}
-
-	err = flexio_process_call(dpa_thread->dpa_ctx->flexio_process,
-					  dpa_thread->dpa_ctx->vq_rpc_func[VRDMA_DPA_VQ_QP],
-					  &rpc_ret, vqp->dpa_vqp.dpa_heap_memory);
-	if (err) {
-		log_error("Failed to call rpc, err(%d), rpc_ret(%ld)",
-				  err, rpc_ret);
-		if (flexio_err_status(dpa_thread->dpa_ctx->flexio_process)) {
-			flexio_coredump_create(dpa_thread->dpa_ctx->flexio_process, "/images/flexio.core");
-		}
-		ret = -1;
-		goto free_memory;
-	}
-
-	//log_info("vqp call rpc, vqp dpa_handle %lx, vqp idx %d\n",
-	//			  vqp->dpa_vqp.dpa_heap_memory, vqp->qp_idx);
-
-free_memory:
-	free(eh_qp_data);
-out:
-	return ret;
-}
-
-static int
-vrdma_dpa_vq_ctx_release(struct spdk_vrdma_qp *vqp)
-{
-	struct vrdma_dpa_vqp_ctx *eh_qp_data;
-	struct vrdma_dpa_thread_ctx *dpa_thread;;
-	flexio_status err;
-	uint64_t rpc_ret;
-	int ret = 0;
-
-	if (!vqp || vqp->dpa_vqp.dpa_thread) {
-		return;
-	}
-	dpa_thread = vqp->dpa_vqp.dpa_thread;
-	eh_qp_data = calloc(1, sizeof(*eh_qp_data));
-	if (!eh_qp_data) {
-		log_error("ctx data malloc failed, no more memory");
-		ret = -1;
-		goto out;
-	}
-	eh_qp_data->state = VRDMA_DPA_VQ_STATE_SUSPEND;
-	dpa_thread->eh_ctx->vqp_ctx[vqp->dpa_vqp.ctx_idx].valid = 0;
-
-	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
-				     			&eh_qp_data->state, sizeof(eh_qp_data->state),
 				     			vqp->dpa_vqp.dpa_heap_memory);
 	if (err) {
 		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
@@ -1270,7 +1218,7 @@ static void vrdma_dpa_vqp_destroy(struct spdk_vrdma_qp *vqp)
 					vqp->qp_idx, vqp->dpa_vqp.emu_db_to_cq_id);
 		return;
 	}
-	vrdma_dpa_vq_ctx_release(vqp);
+	vrdma_dpa_set_vq_stop_fetch(vqp);
 	vrdma_dpa_mm_free(dpa_thread->dpa_ctx->flexio_process, 
 						vqp->dpa_vqp.dpa_heap_memory);
 	vqp->dpa_vqp.dpa_thread->attached_vqp_num--;
@@ -1538,6 +1486,7 @@ int vrdma_dpa_set_vq_repost_pi(void *vqp_hdl, uint16_t vq_repost_pi)
 	flexio_uintptr_t daddr;
 	flexio_status err;
 	int ret = 0;
+	uint64_t rpc_ret;
 
 	dpa_thread = vqp->dpa_vqp.dpa_thread;
 	/*prepare host and arm wr&pi address which used for rdma write*/
@@ -1555,6 +1504,67 @@ int vrdma_dpa_set_vq_repost_pi(void *vqp_hdl, uint16_t vq_repost_pi)
 				     			modify_data, sizeof(*modify_data), daddr);
 	if (err) {
 		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
+		ret = -1;
+		goto free_memory;
+	}
+
+	err = flexio_process_call(dpa_thread->dpa_ctx->flexio_process,
+					  dpa_thread->dpa_ctx->vq_rpc_func[VRDMA_DPA_VQ_QP],
+					  &rpc_ret, vqp->dpa_vqp.dpa_heap_memory);
+	if (err) {
+		log_error("Failed to call rpc, err(%d), rpc_ret(%ld)",
+				  err, rpc_ret);
+		if (flexio_err_status(dpa_thread->dpa_ctx->flexio_process)) {
+			flexio_coredump_create(dpa_thread->dpa_ctx->flexio_process, "/images/flexio.core");
+		}
+		ret = -1;
+		goto free_memory;
+	}
+
+free_memory:
+	free(modify_data);
+out:
+	return ret;
+}
+
+int vrdma_dpa_set_vq_stop_fetch(void *vqp_hdl)
+{
+	struct vrdma_dpa_vqp_modify_ctx *modify_data;
+	struct vrdma_dpa_thread_ctx *dpa_thread;
+	struct spdk_vrdma_qp *vqp = (struct spdk_vrdma_qp *)vqp_hdl;
+	flexio_uintptr_t daddr;
+	flexio_status err;
+	int ret = 0;
+	uint64_t rpc_ret;
+
+	dpa_thread = vqp->dpa_vqp.dpa_thread;
+	/*prepare host and arm wr&pi address which used for rdma write*/
+	modify_data = calloc(1, sizeof(*modify_data));
+	if (!modify_data) {
+		log_error("mctx data malloc failed, no more memory");
+		ret = -1;
+		goto out;
+	}
+	modify_data->field |= 1 << VRDMA_DPA_VQP_MOD_STOP_FETCH_BIT;
+	daddr = vqp->dpa_vqp.dpa_heap_memory + offsetof(struct vrdma_dpa_vqp_ctx, mctx);
+	
+	err = flexio_host2dev_memcpy(dpa_thread->dpa_ctx->flexio_process,
+				     			modify_data, sizeof(*modify_data), daddr);
+	if (err) {
+		log_error("Failed to copy vqp ctx to dev, err(%d)", err);
+		ret = -1;
+		goto free_memory;
+	}
+
+	err = flexio_process_call(dpa_thread->dpa_ctx->flexio_process,
+					  dpa_thread->dpa_ctx->vq_rpc_func[VRDMA_DPA_VQ_QP],
+					  &rpc_ret, vqp->dpa_vqp.dpa_heap_memory);
+	if (err) {
+		log_error("Failed to call rpc, err(%d), rpc_ret(%ld)",
+				  err, rpc_ret);
+		if (flexio_err_status(dpa_thread->dpa_ctx->flexio_process)) {
+			flexio_coredump_create(dpa_thread->dpa_ctx->flexio_process, "/images/flexio.core");
+		}
 		ret = -1;
 		goto free_memory;
 	}

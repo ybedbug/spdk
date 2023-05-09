@@ -260,6 +260,21 @@ vrdma_dpa_sq_update_pi(struct vrdma_dpa_event_handler_ctx *ehctx,
 							0, 0, 0, pi, wqe_flag);
 }
 
+static inline void
+vrdma_dpa_sq_update_flags(struct vrdma_dpa_event_handler_ctx *ehctx,
+					struct vrdma_dpa_vqp_ctx *vqp_ctx, uint16_t flags,
+					uint16_t wqe_flag)
+{
+	uint32_t remote_key;
+	uint64_t remote_addr;
+
+	remote_key   = vqp_ctx->arm_vq_ctx.sq_lkey;
+	remote_addr  = vqp_ctx->arm_vq_ctx.handle_flags_addr;
+
+	vrdma_dpa_set_dma_wqe(ehctx, remote_key, remote_addr, 
+							0, 0, 0, flags, wqe_flag);
+}
+
 #if 0
 static void
 vrdma_dpa_rq_process(struct vrdma_dpa_event_handler_ctx *ehctx,
@@ -365,6 +380,7 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 	uint16_t sq_pi = 0, sq_pi_last = 0;
 	uint16_t total_wqe = 0;
 	uint16_t wqe_loop = 0;
+	uint16_t arm_flags = 0, wqe_flags = 0;
 
 	vqp_ctx = (struct vrdma_dpa_vqp_ctx *)vqp_daddr;
 
@@ -382,7 +398,14 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 			vqp_ctx->host_vq_ctx.sq_wqebb_cnt, vqp_ctx->host_vq_ctx.sq_wqebb_size,
 			vqp_ctx->host_vq_ctx.emu_crossing_mkey, vqp_ctx->host_vq_ctx.sf_crossing_mkey);
 #endif
-	//fence_rw();
+	if (vqp_ctx->mctx.field & (1 << VRDMA_DPA_VQP_MOD_STOP_FETCH_BIT)) {
+		printf("test, stop dpa wqe fetch\n");
+		arm_flags |= 1 << VRDMA_DPA_VQP_FLAGS_STOPPED_BIT;
+		wqe_flags |= VRDMA_DPA_WQE_INLINE;
+		vrdma_dpa_sq_update_flags(ehctx, vqp_ctx, arm_flags, wqe_flags);
+		return 0;
+	}
+	
 	sq_pi_last = vqp_ctx->sq_last_fetch_start;
 	sq_pi = *(uint16_t*)(ehctx->window_base_addr + vqp_ctx->host_vq_ctx.sq_pi_paddr);
 
@@ -424,10 +447,6 @@ vrdma_dpa_handle_one_vqp(struct flexio_dev_thread_ctx *dtctx,
 
 out:
 	vqp_ctx->sq_last_fetch_start = sq_pi;
-	if (vqp_ctx->mctx.field & (1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT)) {
-		vqp_ctx->sq_last_fetch_start = vqp_ctx->mctx.repost_pi;
-		vqp_ctx->mctx.field &= ~(1 << VRDMA_DPA_VQP_MOD_REPOST_PI_BIT)
-	}
 	return total_wqe;
 }
 
@@ -440,12 +459,14 @@ vrdma_dpa_handle_actived_vqp(struct flexio_dev_thread_ctx * dtctx,
 	uint32_t handled_wqe = 0;
 	flexio_uintptr_t vqp_daddr;
 
+	spin_lock(&ectx->vqp_array_lock);
 	for (vqp_idx = 0; vqp_idx < VQP_PER_THREAD; vqp_idx++) {
 		if (ehctx->vqp_ctx[vqp_idx].valid) {
 			vqp_daddr = ehctx->vqp_ctx[vqp_idx].vqp_ctx_handle;
 			handled_wqe += vrdma_dpa_handle_one_vqp(dtctx, ehctx, vqp_daddr);
 		}
 	}
+	spin_unlock(&ectx->vqp_array_lock);
 	return handled_wqe;
 }
 #endif

@@ -152,6 +152,7 @@ union vrdma_align_pici {
 		uint16_t rq_pi;
 	} pi;
 	uint32_t ci;
+	uint16_t handle_flags;
 };
 
 struct spdk_vrdma_cq {
