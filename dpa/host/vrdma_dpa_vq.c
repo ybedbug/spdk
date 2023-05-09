@@ -1575,6 +1575,20 @@ out:
 	return ret;
 }
 
+void vrdma_dpa_vq_is_stopped(void *vqp_hdl)
+{
+	struct spdk_vrdma_qp *vqp = vqp_hdl;
+	if (!vqp) {
+		return;
+	}
+	/* this flag is updated by DPA, here keep checking */
+	while (!(vqp->qp_pi->handle_flags &
+			(1 << VRDMA_DPA_VQP_FLAGS_STOPPED_BIT))) {
+		continue;
+	}
+	vqp->qp_pi->handle_flags &= ~(1 << VRDMA_DPA_VQP_FLAGS_STOPPED_BIT);
+	return;
+}
 
 struct vrdma_vq_ops vrdma_dpa_vq_ops = {
 	.ctx_get_create = vrdma_dpa_thread_ctx_get_create,
